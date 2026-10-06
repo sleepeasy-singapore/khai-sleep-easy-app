@@ -27,7 +27,6 @@
 
   "--comment-scan--": "扫描页面",
   "noDevices": "暂无设备",
-  "connectionFailed": "连接失败",
   "scan": "扫描",
   "unsupportedBluetoothDevice": "非 O2Ring 设备",
   "scanning": "正在扫描",

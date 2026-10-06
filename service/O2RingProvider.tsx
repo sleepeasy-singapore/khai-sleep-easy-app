@@ -942,10 +942,7 @@ const processReadQueue = useCallback(() => {
           return true;
         } catch (e) {
           console.warn("Error@O2RingProvider.tsx/connectToDevice: ", e);
-          setConnectedDevice(null);
-          setServiceReady(Platform.OS === "android");
-          setIosRealtimeReady(Platform.OS === "android");
-          throw e;
+          return false;
         } finally {
           setConnecting(false);
           connectingRef.current = false;

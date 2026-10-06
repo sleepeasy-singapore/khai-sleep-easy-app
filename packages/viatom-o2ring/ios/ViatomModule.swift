@@ -122,11 +122,11 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       pendingConnectContinuations[identifier] = continuation
       central?.connect(target, options: nil)
       connectTimeoutTasks[identifier] = Task { [weak self] in
-        try? await Task.sleep(nanoseconds: 40_000_000_000)
+        try? await Task.sleep(nanoseconds: 20_000_000_000)
         guard !Task.isCancelled, let self = self else { return }
         self.completePendingConnect(
           identifier,
-          with: .failure(ViatomException(code: "CONNECT_TIMEOUT", description: "Timed out connecting to or initializing device services"))
+          with: .failure(ViatomException(code: "CONNECT_TIMEOUT", description: "Timed out connecting to device"))
         )
         self.central?.cancelPeripheralConnection(target)
       }
@@ -226,13 +226,6 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       return
     }
 
-#if DEBUG
-    let serviceUUIDs = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID])?
-      .map(\.uuidString)
-      .joined(separator: ",") ?? "<none>"
-    NSLog("[Viatom BLE] O2 device discovered name=%@ services=%@ RSSI=%@", name, serviceUUIDs, RSSI)
-#endif
-
     let existingModel = discoveredDevices[peripheral.identifier]?.model ?? 0
     let model = existingModel > 0 ? existingModel : guessModel(from: advertisementData)
 
@@ -264,6 +257,7 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     util.peripheral = peripheral
     communicator = util
 
+    completePendingConnect(peripheral.identifier, with: .success(true))
     emit("onConnected", [
       "mac": peripheral.identifier.uuidString,
       "model": connectedModel ?? 0
@@ -296,19 +290,8 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
 
   @objc(serviceDeployed:)
   func serviceDeployed(_ completed: Bool) {
-#if DEBUG
-    NSLog("[Viatom BLE] VTO2 service deployed=%@", completed ? "true" : "false")
-#endif
     guard completed else {
-      let error = ViatomException(code: "SERVICE_INIT_FAILED", description: "Failed to initialize Viatom device services")
-      sendError(code: error.code, message: error.description)
-      if let identifier = connectedIdentifier {
-        completePendingConnect(identifier, with: .failure(error))
-      }
-      if let peripheral = connectedPeripheral {
-        central?.cancelPeripheralConnection(peripheral)
-      }
-      cleanupConnection()
+      sendError(code: "SERVICE_INIT_FAILED", message: "Failed to initialise device services")
       return
     }
     isServiceReady = true
@@ -316,9 +299,6 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     emit("onServiceReady", [
       "mac": connectedIdentifier?.uuidString ?? ""
     ])
-    if let identifier = connectedIdentifier {
-      completePendingConnect(identifier, with: .success(true))
-    }
   }
 
   @objc(getInfoWithResultData:)
@@ -633,9 +613,6 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
   }
 
   private func sendError(code: String, message: String) {
-#if DEBUG
-    NSLog("[Viatom BLE] Error %@: %@", code, message)
-#endif
     emit("onError", ["code": code, "message": message])
   }
 }

@@ -27,7 +27,6 @@
 
   "--comment-scan--": "Scan Page",
   "noDevices": "No devices",
-  "connectionFailed": "Connection failed",
   "scan": "Scan",
   "unsupportedBluetoothDevice": "Not an O2Ring",
   "scanning": "Scanning",

@@ -1,6 +1,5 @@
 import React, { useMemo, useCallback } from "react";
 import {
-  Alert,
   ActivityIndicator,
   FlatList,
   StyleSheet,
@@ -107,14 +106,9 @@ export default function ScanDeviceScreen() {
   const hasDevices = useMemo(() => devices.length > 0, [devices]);
 
   async function handleConnect(item: DeviceItem) {
-    try {
-      const ok = await connectToDevice(item);
-      if (ok) {
-        router.back();
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      Alert.alert(t("connectionFailed"), message);
+    const ok = await connectToDevice(item);
+    if (ok) {
+      router.back();
     }
   }
 
