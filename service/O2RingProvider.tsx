@@ -590,6 +590,14 @@ const processReadQueue = useCallback(() => {
       });
 
       subDev = O2Ring.addDeviceFoundListener((dev) => {
+        const normalizedName = dev.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "");
+        const isSupportedName = ["o2ring", "o2watch", "woxi"].some((token) =>
+          normalizedName.includes(token)
+        ) || /^(?:o2|02)\d{4,}$/.test(normalizedName);
+        if (dev.supported === false || !isSupportedName) return;
+
         setDevices((prev) => {
           const exists = prev.some((item) => item.mac === dev.mac);
           return exists ? prev : [...prev, dev];
@@ -934,7 +942,10 @@ const processReadQueue = useCallback(() => {
           return true;
         } catch (e) {
           console.warn("Error@O2RingProvider.tsx/connectToDevice: ", e);
-          return false;
+          setConnectedDevice(null);
+          setServiceReady(Platform.OS === "android");
+          setIosRealtimeReady(Platform.OS === "android");
+          throw e;
         } finally {
           setConnecting(false);
           connectingRef.current = false;

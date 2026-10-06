@@ -22,6 +22,8 @@ export type DeviceFoundEvent = {
   mac: string;
   name: string;
   model: number;
+  supported?: boolean;
+  rssi?: number;
 };
 
 export type ConnectedEvent = {

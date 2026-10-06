@@ -1,5 +1,6 @@
 import React, { useMemo, useCallback } from "react";
 import {
+  Alert,
   ActivityIndicator,
   FlatList,
   StyleSheet,
@@ -24,6 +25,8 @@ type DeviceRowProps = {
 
 function DeviceRow({ item, onPress, disabled, connecting }: DeviceRowProps) {
   const { colors: C, fonts: F } = useTheme();
+  const { t } = useTranslation();
+  const unsupported = item.supported === false;
 
   return (
     <TouchableOpacity
@@ -41,7 +44,7 @@ function DeviceRow({ item, onPress, disabled, connecting }: DeviceRowProps) {
         },
       ]}
       activeOpacity={0.8}
-      disabled={disabled}>
+      disabled={disabled || unsupported}>
       <Image
         source={require("../../../assets/images/O2RingBGR.png")}
         style={{ width: 40, height: 40, marginRight: 8 }}
@@ -49,9 +52,22 @@ function DeviceRow({ item, onPress, disabled, connecting }: DeviceRowProps) {
       />
       <View style={{ flex: 1 }}>
         <Text style={[F.text, { color: C.white }]}>{item.name}</Text>
+        <Text style={[F.text, { color: C.sub, fontSize: 12 }]}>
+          {unsupported
+            ? t("unsupportedBluetoothDevice")
+            : item.rssi != null
+            ? `${item.rssi} dBm`
+            : null}
+        </Text>
       </View>
       {connecting ? (
         <ActivityIndicator color={C.white} />
+      ) : unsupported ? (
+        <MaterialCommunityIcons
+          name="help-circle-outline"
+          color={C.sub}
+          size={22}
+        />
       ) : (
         <MaterialCommunityIcons
           name="chevron-right"
@@ -91,9 +107,14 @@ export default function ScanDeviceScreen() {
   const hasDevices = useMemo(() => devices.length > 0, [devices]);
 
   async function handleConnect(item: DeviceItem) {
-    const ok = await connectToDevice(item);
-    if (ok) {
-      router.back();
+    try {
+      const ok = await connectToDevice(item);
+      if (ok) {
+        router.back();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      Alert.alert(t("connectionFailed"), message);
     }
   }
 

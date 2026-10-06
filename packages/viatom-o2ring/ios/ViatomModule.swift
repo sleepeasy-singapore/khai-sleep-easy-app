@@ -26,7 +26,8 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
   private var pendingPowerOnContinuations: [CheckedContinuation<Void, Error>] = []
   private let supportedViatomNameTokens: [String] = [
     "o2ring",
-    "o2 ring",
+    "o2watch",
+    "woxi",
   ]
   private var isScanning = false
   private var isServiceReady = false
@@ -34,6 +35,8 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
   private var connectedIdentifier: UUID?
   private var connectedModel: Int?
   private var pendingConnectModels: [UUID: Int] = [:]
+  private var pendingConnectContinuations: [UUID: CheckedContinuation<Bool, Error>] = [:]
+  private var connectTimeoutTasks: [UUID: Task<Void, Never>] = [:]
   private lazy var isoFormatter: ISO8601DateFormatter = {
     let formatter = ISO8601DateFormatter()
     formatter.formatOptions = [.withInternetDateTime]
@@ -89,9 +92,14 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     return true
   }
 
-  func connect(mac: String, model: Int) throws -> Bool {
+  func connect(mac: String, model: Int) async throws -> Bool {
+    try await ensurePoweredOn()
     ensureCentral()
     isServiceReady = false
+
+    guard model >= 0 else {
+      throw ViatomException(code: "UNSUPPORTED_DEVICE", description: "This Bluetooth device is not recognized as an O2Ring or O2 Watch")
+    }
 
     guard let identifier = UUID(uuidString: mac) else {
       throw ViatomException(code: "INVALID_DEVICE", description: "Invalid device identifier")
@@ -103,10 +111,26 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       throw ViatomException(code: "DEVICE_NOT_FOUND", description: "Unable to find peripheral with identifier \(mac)")
     }
 
-    pendingConnectModels[identifier] = model
-    central?.connect(target, options: nil)
+    guard pendingConnectContinuations[identifier] == nil else {
+      throw ViatomException(code: "CONNECT_IN_PROGRESS", description: "Connection to this device is already in progress")
+    }
+
     discoveredDevices[identifier] = DiscoveredDevice(peripheral: target, name: target.name ?? "O2Ring", model: model)
-    return true
+    pendingConnectModels[identifier] = model
+
+    return try await withCheckedThrowingContinuation { continuation in
+      pendingConnectContinuations[identifier] = continuation
+      central?.connect(target, options: nil)
+      connectTimeoutTasks[identifier] = Task { [weak self] in
+        try? await Task.sleep(nanoseconds: 40_000_000_000)
+        guard !Task.isCancelled, let self = self else { return }
+        self.completePendingConnect(
+          identifier,
+          with: .failure(ViatomException(code: "CONNECT_TIMEOUT", description: "Timed out connecting to or initializing device services"))
+        )
+        self.central?.cancelPeripheralConnection(target)
+      }
+    }
   }
 
   func disconnect() -> Bool {
@@ -165,14 +189,17 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       completePendingPowerOn(with: .success(()))
     case .poweredOff:
       completePendingPowerOn(with: .failure(ViatomException(code: "BLUETOOTH_OFF", description: "Bluetooth is powered off")))
+      completeAllPendingConnects(with: ViatomException(code: "BLUETOOTH_OFF", description: "Bluetooth is powered off"))
       if isScanning {
         central.stopScan()
         isScanning = false
       }
     case .unauthorized:
       completePendingPowerOn(with: .failure(ViatomException(code: "BLUETOOTH_UNAUTHORIZED", description: "Bluetooth permission denied")))
+      completeAllPendingConnects(with: ViatomException(code: "BLUETOOTH_UNAUTHORIZED", description: "Bluetooth permission denied"))
     case .unsupported:
       completePendingPowerOn(with: .failure(ViatomException(code: "BLUETOOTH_UNSUPPORTED", description: "Bluetooth unsupported on this device")))
+      completeAllPendingConnects(with: ViatomException(code: "BLUETOOTH_UNSUPPORTED", description: "Bluetooth unsupported on this device"))
     default:
       break
     }
@@ -183,11 +210,31 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
                       advertisementData: [String: Any],
                       rssi RSSI: NSNumber) {
     guard let name = viatomDeviceName(for: peripheral, advertisementData: advertisementData) else {
+#if DEBUG
+      let localName = advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? "<none>"
+      let serviceUUIDs = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID])?
+        .map(\.uuidString)
+        .joined(separator: ",") ?? "<none>"
+      NSLog(
+        "[Viatom BLE] Ignored peripheral name=%@ localName=%@ services=%@ RSSI=%@",
+        peripheral.name ?? "<none>",
+        localName,
+        serviceUUIDs,
+        RSSI
+      )
+#endif
       return
     }
 
+#if DEBUG
+    let serviceUUIDs = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID])?
+      .map(\.uuidString)
+      .joined(separator: ",") ?? "<none>"
+    NSLog("[Viatom BLE] O2 device discovered name=%@ services=%@ RSSI=%@", name, serviceUUIDs, RSSI)
+#endif
+
     let existingModel = discoveredDevices[peripheral.identifier]?.model ?? 0
-    let model = existingModel != 0 ? existingModel : guessModel(from: advertisementData)
+    let model = existingModel > 0 ? existingModel : guessModel(from: advertisementData)
 
     discoveredDevices[peripheral.identifier] = DiscoveredDevice(
       peripheral: peripheral,
@@ -198,7 +245,9 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     emit("onDeviceFound", [
       "mac": peripheral.identifier.uuidString,
       "name": name,
-      "model": model
+      "model": model,
+      "supported": true,
+      "rssi": RSSI.intValue
     ])
   }
 
@@ -222,6 +271,8 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
   }
 
   func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+    let connectionError = error ?? ViatomException(code: "CONNECT_FAILED", description: "Failed to connect to device")
+    completePendingConnect(peripheral.identifier, with: .failure(connectionError))
     sendError(code: "CONNECT_FAILED", message: error?.localizedDescription ?? "Failed to connect to device")
   }
 
@@ -245,8 +296,19 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
 
   @objc(serviceDeployed:)
   func serviceDeployed(_ completed: Bool) {
+#if DEBUG
+    NSLog("[Viatom BLE] VTO2 service deployed=%@", completed ? "true" : "false")
+#endif
     guard completed else {
-      sendError(code: "SERVICE_INIT_FAILED", message: "Failed to initialise device services")
+      let error = ViatomException(code: "SERVICE_INIT_FAILED", description: "Failed to initialize Viatom device services")
+      sendError(code: error.code, message: error.description)
+      if let identifier = connectedIdentifier {
+        completePendingConnect(identifier, with: .failure(error))
+      }
+      if let peripheral = connectedPeripheral {
+        central?.cancelPeripheralConnection(peripheral)
+      }
+      cleanupConnection()
       return
     }
     isServiceReady = true
@@ -254,6 +316,9 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     emit("onServiceReady", [
       "mac": connectedIdentifier?.uuidString ?? ""
     ])
+    if let identifier = connectedIdentifier {
+      completePendingConnect(identifier, with: .success(true))
+    }
   }
 
   @objc(getInfoWithResultData:)
@@ -368,6 +433,24 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     communicator = nil
   }
 
+  private func completePendingConnect(_ identifier: UUID, with result: Result<Bool, Error>) {
+    guard let continuation = pendingConnectContinuations.removeValue(forKey: identifier) else { return }
+    connectTimeoutTasks.removeValue(forKey: identifier)?.cancel()
+    pendingConnectModels[identifier] = nil
+    switch result {
+    case .success(let connected):
+      continuation.resume(returning: connected)
+    case .failure(let error):
+      continuation.resume(throwing: error)
+    }
+  }
+
+  private func completeAllPendingConnects(with error: Error) {
+    for identifier in Array(pendingConnectContinuations.keys) {
+      completePendingConnect(identifier, with: .failure(error))
+    }
+  }
+
   private func ensurePoweredOn() async throws {
     ensureCentral()
     guard let central = central else {
@@ -452,6 +535,7 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     let normalized = rawName
       .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
       .lowercased()
+      .filter { $0.isLetter || $0.isNumber }
 
     guard !normalized.isEmpty else {
       return false
@@ -463,7 +547,12 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       }
     }
 
-    return false
+    let serialPrefixes = ["o2", "02"]
+    return serialPrefixes.contains { prefix in
+      guard normalized.hasPrefix(prefix) else { return false }
+      let serial = normalized.dropFirst(prefix.count)
+      return serial.count >= 4 && serial.allSatisfy(\.isNumber)
+    }
   }
 
   private func parseInteger(from raw: String?) -> Int? {
@@ -544,6 +633,9 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
   }
 
   private func sendError(code: String, message: String) {
+#if DEBUG
+    NSLog("[Viatom BLE] Error %@: %@", code, message)
+#endif
     emit("onError", ["code": code, "message": message])
   }
 }
@@ -626,7 +718,7 @@ public final class ViatomModule: Module {
 
     AsyncFunction("connect") { (mac: String, model: Int) in
       return try await self.withManager { manager in
-        try manager.connect(mac: mac, model: model)
+        try await manager.connect(mac: mac, model: model)
       }
     }
 
