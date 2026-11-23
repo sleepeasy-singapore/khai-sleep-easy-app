@@ -162,7 +162,7 @@ export function calculateRespiratoryRate(
     }
   }
 
-  // Calibrated physiological PR-to-RR curve (accurate down to 8-9 bpm for resting/athletic PR 60)
+  // Calibrated physiological PR-to-RR curve
   if (pulseRates.length === 0) return 13;
   const recent = pulseRates.slice(-10);
   const avgPr = recent.reduce((a, b) => a + b, 0) / recent.length;

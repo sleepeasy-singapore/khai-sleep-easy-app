@@ -1785,7 +1785,9 @@ const processReadQueue = useCallback(() => {
   const isValidMotion = (v: number) => v >= 0 && v <= 235;
   const filteredMotion = motion != null ? Math.max(0, motion - 20) : 0;
   const motionSeries = useReadingSeries(filteredMotion, realtimeUpdatedAt, isValidMotion, connectedDevice?.mac);
-  const rrValue = isSignalActive && pr != null && pr > 0 ? calculateRespiratoryRate([pr]) : null;
+  const rrValue = isSignalActive && pr != null && pr > 0
+    ? calculateRespiratoryRate(prBuffer.current, ppgBufferRef.current.ir, ppgHzRef.current)
+    : null;
   const isValidRr = (v: number) => v >= 5 && v <= 60;
   const rrSeries = useReadingSeries(rrValue, realtimeUpdatedAt, isValidRr, connectedDevice?.mac);
 

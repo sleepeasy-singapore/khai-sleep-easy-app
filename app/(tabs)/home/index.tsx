@@ -351,7 +351,7 @@ export default function Home() {
   );
 
   const isSignalActive = spo2 != null && spo2 >= 20 && pr != null && pr >= 20;
-  const filteredMotion = motion != null ? Math.max(0, motion - 20) : 0;
+  const filteredMotion = motion != null ? Math.max(0, motion) : 0;
   const rrValue = isSignalActive && pr != null && pr > 0 ? calculateRespiratoryRate([pr]) : null;
 
   const displaySpo2 =

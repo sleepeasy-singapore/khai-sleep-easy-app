@@ -51,8 +51,8 @@ export default function LiveBpTrendChart({
     setWidth(Math.round(e.nativeEvent.layout.width));
 
   const min = 40;
-  const max = 200;
-  const ticks = [200, 160, 120, 80, 40];
+  const max = 160;
+  const ticks = [160, 120, 80, 40];
 
   const rawSbp = sbpPoints ?? [];
   const rawDbp = dbpPoints ?? [];
