@@ -329,7 +329,7 @@ export async function generateAndReturnPdfUri(data: ReportData): Promise<string>
             <text x="${startX - 8}" y="${chartHeight + 4}" font-size="11" fill="#444" text-anchor="end">75</text>
             <!-- Threshold line at 90% -->
             <line x1="${startX}" y1="${5 + (chartHeight - 10) * 0.4}" x2="755" y2="${5 + (chartHeight - 10) * 0.4}" stroke="#ef4444" stroke-width="1.2" />
-            <polyline fill="none" stroke="#16a34a" stroke-width="2.2" points="${spo2Points}" />
+            <polyline fill="none" stroke="#22C55E" stroke-width="2.8" points="${spo2Points}" />
             ${timeLabelsSvg}
           </svg>
         </div>
@@ -352,7 +352,7 @@ export async function generateAndReturnPdfUri(data: ReportData): Promise<string>
             <text x="${startX - 8}" y="${chartHeight + 4}" font-size="11" fill="#444" text-anchor="end">40</text>
             <!-- Threshold line at 40 bpm -->
             <line x1="${startX}" y1="${5 + (chartHeight - 10) * 0.888}" x2="755" y2="${5 + (chartHeight - 10) * 0.888}" stroke="#ef4444" stroke-width="1.2" />
-            <polyline fill="none" stroke="#16a34a" stroke-width="2.2" points="${prPoints}" />
+            <polyline fill="none" stroke="#22C55E" stroke-width="2.8" points="${prPoints}" />
             ${timeLabelsSvg}
           </svg>
         </div>

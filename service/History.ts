@@ -41,11 +41,14 @@ export const uploadCsv = async (params: {
   if (!patientId) throw new Error("uploadCsv: missing patientId");
   if (!baseURL) throw new Error("uploadCsv: missing baseURL");
 
+  const rawUri = typeof item.uri === "string" ? item.uri : (item as any)?.uri?.href ?? (item as any)?.uri ?? "";
+  const normalizedUri = rawUri.startsWith("file://") ? rawUri : `file://${rawUri}`;
+
   const form = new FormData();
   form.append("patient_id", patientId);
   form.append("silent", "1");
   form.append("csv", {
-    uri: item.uri,
+    uri: normalizedUri,
     name: item.id,
     type: "text/csv",
   } as any);

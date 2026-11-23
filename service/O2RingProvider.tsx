@@ -1450,7 +1450,7 @@ const processReadQueue = useCallback(() => {
   const startAutoDisconnectCountdown = useCallback(() => {
     if (disconnectCountdown != null || countdownTimerRef.current != null) return;
     isAutoDisconnectActiveRef.current = true;
-    setDisconnectCountdown(5);
+    setDisconnectCountdown(10);
 
     if (serviceReadyRef.current && connectedDeviceRef.current) {
       // Send immediate getInfo ping to reset ring auto-off timer and start history sync

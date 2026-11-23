@@ -576,7 +576,7 @@ export default function DetailedReport() {
                   },
                 ]}
                 domain={{ y: [75, 100] }}>
-                {({ points }) => <Line points={points.spo2} color="green" />}
+                {({ points }) => <Line points={points.spo2} color="#22C55E" strokeWidth={2.8} />}
               </CartesianChart>
             </View>
 
@@ -610,7 +610,7 @@ export default function DetailedReport() {
                   },
                 ]}
                 domain={{ y: [30, 120] }}>
-                {({ points }) => <Line points={points.pr} color={"green"} />}
+                {({ points }) => <Line points={points.pr} color="#22C55E" strokeWidth={2.8} />}
               </CartesianChart>
             </View>
           </>
