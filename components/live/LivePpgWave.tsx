@@ -5,11 +5,13 @@ import {
   StyleSheet,
   Text,
   View,
+  TouchableOpacity,
 } from "react-native";
 import Svg, { Line, Path } from "react-native-svg";
 import { useFocusEffect } from "expo-router";
 import * as O2Ring from "@ios-app/viatom-o2ring";
 import { useTheme } from "../../theme/ThemeProvider";
+import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const FS = 125; // standard recording frequency (125 Hz)
@@ -210,6 +212,8 @@ type Props = {
   title: string;
   waitingText: string;
   height?: number;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 };
 
 export default function LivePpgWave({
@@ -217,6 +221,8 @@ export default function LivePpgWave({
   title,
   waitingText,
   height = 150,
+  onMoveUp,
+  onMoveDown,
 }: Props) {
   const { colors: C } = useTheme();
   const [width, setWidth] = useState(0);
@@ -262,7 +268,23 @@ export default function LivePpgWave({
       accessible
       accessibilityLabel={title}>
       <View style={styles.headRow}>
-        <Text style={[styles.title, { color: C.text }]}>{title}</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Text style={[styles.title, { color: C.text }]}>{title}</Text>
+          {(onMoveUp || onMoveDown) && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+              {onMoveUp && (
+                <TouchableOpacity onPress={onMoveUp} style={{ padding: 2 }} activeOpacity={0.7}>
+                  <Ionicons name="chevron-up" size={16} color={C.sub} />
+                </TouchableOpacity>
+              )}
+              {onMoveDown && (
+                <TouchableOpacity onPress={onMoveDown} style={{ padding: 2 }} activeOpacity={0.7}>
+                  <Ionicons name="chevron-down" size={16} color={C.sub} />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+        </View>
         <Text style={[styles.hz, { color: C.sub }]}>{ppgHz} Hz</Text>
       </View>
 

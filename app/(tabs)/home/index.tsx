@@ -38,6 +38,9 @@ import { calculateRespiratoryRate } from "../../../service/HaemodynamicCalculati
 import { BP_CALIBRATION_KEY } from "../../BpCalibration";
 import { showBpFeature, showRrFeature } from "../../../service/AppVariant";
 
+const DEFAULT_CHART_ORDER = ["spo2", "pr", "bp", "rr", "motion", "ppg"];
+const CHART_ORDER_KEY = "settings:chart_order";
+
 const isWatchDevice = (name?: string) => {
   const n = (name || "").toLowerCase().replace(/[\s_-]/g, "");
   if (n.includes("kidso2") || n.includes("o2ring") || n.includes("wearo2")) return false;
@@ -160,6 +163,46 @@ export default function Home() {
     motion: true,
     ppg: true,
   });
+
+  const [chartOrder, setChartOrder] = useState<string[]>(DEFAULT_CHART_ORDER);
+
+  useFocusEffect(
+    useCallback(() => {
+      AsyncStorage.getItem(CHART_ORDER_KEY).then((stored) => {
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed)) {
+              const combined = Array.from(new Set([...parsed, ...DEFAULT_CHART_ORDER]));
+              setChartOrder(combined);
+            }
+          } catch {}
+        }
+      });
+    }, [])
+  );
+
+  const moveChartUp = async (id: string) => {
+    const idx = chartOrder.indexOf(id);
+    if (idx <= 0) return;
+    const next = [...chartOrder];
+    const temp = next[idx - 1];
+    next[idx - 1] = next[idx];
+    next[idx] = temp;
+    setChartOrder(next);
+    await AsyncStorage.setItem(CHART_ORDER_KEY, JSON.stringify(next));
+  };
+
+  const moveChartDown = async (id: string) => {
+    const idx = chartOrder.indexOf(id);
+    if (idx < 0 || idx >= chartOrder.length - 1) return;
+    const next = [...chartOrder];
+    const temp = next[idx + 1];
+    next[idx + 1] = next[idx];
+    next[idx] = temp;
+    setChartOrder(next);
+    await AsyncStorage.setItem(CHART_ORDER_KEY, JSON.stringify(next));
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -624,95 +667,117 @@ export default function Home() {
             {!isGridFormat ? (
               // Format 1: Stacked (Compact to fit on one screen)
               <>
-                {visibleCharts.spo2 && (
-                  <LiveTrendChart
-                    key="chart-spo2"
-                    title="O2 Level"
-                    unit="%"
-                    currentLabel={displaySpo2}
-                    avgLabel={t("avg")}
-                    points={spo2Series}
-                    min={70}
-                    max={100}
-                    ticks={[100, 90, 80, 70]}
-                    bands={SPO2_BANDS}
-                    accent={C.tint}
-                    height={38}
-                  />
-                )}
-
-                {visibleCharts.pr && (
-                  <LiveTrendChart
-                    key="chart-pr"
-                    title="PR"
-                    unit="bpm"
-                    currentLabel={displayPr}
-                    avgLabel={t("avg")}
-                    points={prSeries}
-                    min={25}
-                    max={250}
-                    ticks={[250, 125, 25]}
-                    bands={PR_BANDS}
-                    accent={AMBER}
-                    height={38}
-                  />
-                )}
-
-                {visibleCharts.bp && (
-                  <LiveBpTrendChart
-                    key="chart-bp"
-                    title="BP"
-                    unit="mmHg"
-                    currentSbp={displaySbp}
-                    currentDbp={displayDbp}
-                    sbpPoints={sbpSeries}
-                    dbpPoints={dbpSeries}
-                    height={38}
-                    calibrationTime={calibrationTime}
-                    calibrationTimes={effectiveCalibTimes}
-                    calibrationCount={effectiveCalibCount}
-                    extraHeaderLabel={effectiveStabilizing ? "Stabilizing..." : undefined}
-                    onPressCalibration={() => router.push("/BpCalibration?from=home")}
-                  />
-                )}
-
-                {visibleCharts.rr && (
-                  <LiveTrendChart
-                    key="chart-rr"
-                    title="RR"
-                    unit="bpm"
-                    currentLabel={displayRr}
-                    avgLabel={t("avg")}
-                    points={rrSeries}
-                    min={5}
-                    max={40}
-                    ticks={[40, 20, 5]}
-                    bands={[{ value: 40, color: C.tint }, { value: 5, color: C.tint }]}
-                    accent={C.tint}
-                    height={38}
-                    windowMs={30000}
-                  />
-                )}
-
-                {visibleCharts.motion && (
-                  <LiveMotionBarChart
-                    key="chart-motion"
-                    title="Motion"
-                    currentLabel={displayMotion}
-                    points={motionSeries}
-                    height={38}
-                  />
-                )}
-
-                {visibleCharts.ppg && (
-                  <LivePpgWave
-                    key="chart-ppg"
-                    active={isRealtimeReady}
-                    title="PPG"
-                    waitingText={t("waitingForSignal")}
-                    height={38}
-                  />
-                )}
+                {chartOrder.map((id, index) => {
+                  if (id === "spo2" && visibleCharts.spo2) {
+                    return (
+                      <LiveTrendChart
+                        key="chart-spo2"
+                        title="O2 Level"
+                        unit="%"
+                        currentLabel={displaySpo2}
+                        avgLabel={t("avg")}
+                        points={spo2Series}
+                        min={70}
+                        max={100}
+                        ticks={[100, 90, 80, 70]}
+                        bands={SPO2_BANDS}
+                        accent={C.tint}
+                        height={38}
+                        onMoveUp={index > 0 ? () => moveChartUp("spo2") : undefined}
+                        onMoveDown={index < chartOrder.length - 1 ? () => moveChartDown("spo2") : undefined}
+                      />
+                    );
+                  }
+                  if (id === "pr" && visibleCharts.pr) {
+                    return (
+                      <LiveTrendChart
+                        key="chart-pr"
+                        title="PR"
+                        unit="bpm"
+                        currentLabel={displayPr}
+                        avgLabel={t("avg")}
+                        points={prSeries}
+                        min={25}
+                        max={250}
+                        ticks={[250, 125, 25]}
+                        bands={PR_BANDS}
+                        accent={AMBER}
+                        height={38}
+                        onMoveUp={index > 0 ? () => moveChartUp("pr") : undefined}
+                        onMoveDown={index < chartOrder.length - 1 ? () => moveChartDown("pr") : undefined}
+                      />
+                    );
+                  }
+                  if (id === "bp" && visibleCharts.bp) {
+                    return (
+                      <LiveBpTrendChart
+                        key="chart-bp"
+                        title="BP"
+                        unit="mmHg"
+                        currentSbp={displaySbp}
+                        currentDbp={displayDbp}
+                        sbpPoints={sbpSeries}
+                        dbpPoints={dbpSeries}
+                        height={38}
+                        calibrationTime={calibrationTime}
+                        calibrationTimes={effectiveCalibTimes}
+                        calibrationCount={effectiveCalibCount}
+                        extraHeaderLabel={effectiveStabilizing ? "Stabilizing..." : undefined}
+                        onPressCalibration={() => router.push("/BpCalibration?from=home")}
+                        onMoveUp={index > 0 ? () => moveChartUp("bp") : undefined}
+                        onMoveDown={index < chartOrder.length - 1 ? () => moveChartDown("bp") : undefined}
+                      />
+                    );
+                  }
+                  if (id === "rr" && visibleCharts.rr) {
+                    return (
+                      <LiveTrendChart
+                        key="chart-rr"
+                        title="RR"
+                        unit="bpm"
+                        currentLabel={displayRr}
+                        avgLabel={t("avg")}
+                        points={rrSeries}
+                        min={5}
+                        max={40}
+                        ticks={[40, 20, 5]}
+                        bands={[{ value: 40, color: C.tint }, { value: 5, color: C.tint }]}
+                        accent={C.tint}
+                        height={38}
+                        windowMs={30000}
+                        onMoveUp={index > 0 ? () => moveChartUp("rr") : undefined}
+                        onMoveDown={index < chartOrder.length - 1 ? () => moveChartDown("rr") : undefined}
+                      />
+                    );
+                  }
+                  if (id === "motion" && visibleCharts.motion) {
+                    return (
+                      <LiveMotionBarChart
+                        key="chart-motion"
+                        title="Motion"
+                        currentLabel={displayMotion}
+                        points={motionSeries}
+                        height={38}
+                        onMoveUp={index > 0 ? () => moveChartUp("motion") : undefined}
+                        onMoveDown={index < chartOrder.length - 1 ? () => moveChartDown("motion") : undefined}
+                      />
+                    );
+                  }
+                  if (id === "ppg" && visibleCharts.ppg) {
+                    return (
+                      <LivePpgWave
+                        key="chart-ppg"
+                        active={isRealtimeReady}
+                        title="PPG"
+                        waitingText={t("waitingForSignal")}
+                        height={38}
+                        onMoveUp={index > 0 ? () => moveChartUp("ppg") : undefined}
+                        onMoveDown={index < chartOrder.length - 1 ? () => moveChartDown("ppg") : undefined}
+                      />
+                    );
+                  }
+                  return null;
+                })}
               </>
             ) : (
               // Format 2: 2-Column Grid (Bigger charts)

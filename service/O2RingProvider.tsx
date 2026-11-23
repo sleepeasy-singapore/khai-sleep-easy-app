@@ -116,12 +116,8 @@ export function O2RingProvider({ children }: { children: React.ReactNode }) {
   const [lastConnectedMac, setLastConnectedMac] = useState<string | null>(null);
   const [disconnectCountdown, setDisconnectCountdown] = useState<number | null>(null);
   const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [serviceReady, setServiceReady] = useState(
-    Platform.OS === "android" ? true : false
-  );
-  const [iosRealtimeReady, setIosRealtimeReady] = useState(
-    Platform.OS === "android"
-  );
+  const [serviceReady, setServiceReady] = useState(true);
+  const [iosRealtimeReady, setIosRealtimeReady] = useState(true);
   const [battery, setBattery] = useState<number | null>(null);
   const [batteryState, setBatteryState] = useState<number | null>(null);
   const [spo2, setSpo2] = useState<number | null>(null);

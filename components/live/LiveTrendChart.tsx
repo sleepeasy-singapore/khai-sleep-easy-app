@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
-import { LayoutChangeEvent, StyleSheet, Text, View } from "react-native";
+import { LayoutChangeEvent, StyleSheet, Text, View, TouchableOpacity } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import Svg, {
   Circle,
   Defs,
@@ -29,6 +30,8 @@ type Props = {
   height?: number;
   extraLabel?: string;
   windowMs?: number; // custom rolling window duration (default 2 mins)
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 };
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -51,6 +54,8 @@ export default function LiveTrendChart({
   height = 28,
   extraLabel,
   windowMs = 2 * 60 * 1000,
+  onMoveUp,
+  onMoveDown,
 }: Props) {
   const { colors: C } = useTheme();
   const [width, setWidth] = useState(0);
@@ -127,9 +132,25 @@ export default function LiveTrendChart({
       accessible
       accessibilityLabel={`${title}: ${currentLabel} ${unit}`}>
       <View style={styles.headRow}>
-        <Text style={[styles.title, { color: C.text }]} numberOfLines={1}>
-          {title}
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Text style={[styles.title, { color: C.text }]} numberOfLines={1}>
+            {title}
+          </Text>
+          {(onMoveUp || onMoveDown) && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+              {onMoveUp && (
+                <TouchableOpacity onPress={onMoveUp} style={{ padding: 2 }} activeOpacity={0.7}>
+                  <Ionicons name="chevron-up" size={16} color={C.sub} />
+                </TouchableOpacity>
+              )}
+              {onMoveDown && (
+                <TouchableOpacity onPress={onMoveDown} style={{ padding: 2 }} activeOpacity={0.7}>
+                  <Ionicons name="chevron-down" size={16} color={C.sub} />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+        </View>
         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 4, flexShrink: 0 }}>
           {extraLabel && <Text style={{ fontSize: 11, fontWeight: "700", color: "#5BD68A" }} numberOfLines={1}>{extraLabel}</Text>}
           <Text style={[styles.currentInline, { color: C.tint }]} numberOfLines={1}>

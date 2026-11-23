@@ -18,6 +18,8 @@ type Props = {
   calibrationTimes?: number[];
   calibrationCount?: number;
   onPressCalibration?: () => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 };
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -39,6 +41,8 @@ export default function LiveBpTrendChart({
   calibrationTimes,
   calibrationCount,
   onPressCalibration,
+  onMoveUp,
+  onMoveDown,
 }: Props) {
   const { colors: C } = useTheme();
   const [width, setWidth] = useState(0);
@@ -134,6 +138,20 @@ export default function LiveBpTrendChart({
               accessibilityLabel="Fine tune calibration">
               <Ionicons name="settings-outline" size={15} color={C.text} />
             </TouchableOpacity>
+          )}
+          {(onMoveUp || onMoveDown) && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+              {onMoveUp && (
+                <TouchableOpacity onPress={onMoveUp} style={{ padding: 2 }} activeOpacity={0.7}>
+                  <Ionicons name="chevron-up" size={16} color={C.sub} />
+                </TouchableOpacity>
+              )}
+              {onMoveDown && (
+                <TouchableOpacity onPress={onMoveDown} style={{ padding: 2 }} activeOpacity={0.7}>
+                  <Ionicons name="chevron-down" size={16} color={C.sub} />
+                </TouchableOpacity>
+              )}
+            </View>
           )}
         </View>
         <View style={styles.legendRow}>

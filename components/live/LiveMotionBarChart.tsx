@@ -1,7 +1,8 @@
 import React, { useState } from "react";
-import { LayoutChangeEvent, StyleSheet, Text, View } from "react-native";
+import { LayoutChangeEvent, StyleSheet, Text, View, TouchableOpacity } from "react-native";
 import Svg, { Line, Text as SvgText } from "react-native-svg";
 import { useTheme } from "../../theme/ThemeProvider";
+import { Ionicons } from "@expo/vector-icons";
 import type { SeriesPoint } from "./useReadingSeries";
 
 type Props = {
@@ -9,6 +10,8 @@ type Props = {
   currentLabel?: string;
   points: SeriesPoint[];
   height?: number;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 };
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -21,6 +24,8 @@ export default function LiveMotionBarChart({
   title,
   points,
   height = 38,
+  onMoveUp,
+  onMoveDown,
 }: Props) {
   const { colors: C } = useTheme();
   const [width, setWidth] = useState(0);
@@ -38,7 +43,23 @@ export default function LiveMotionBarChart({
   return (
     <View style={[styles.card, { backgroundColor: C.bg2, borderColor: C.border }]}>
       <View style={styles.headRow}>
-        <Text style={[styles.title, { color: C.text }]} numberOfLines={1}>{title}</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Text style={[styles.title, { color: C.text }]} numberOfLines={1}>{title}</Text>
+          {(onMoveUp || onMoveDown) && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+              {onMoveUp && (
+                <TouchableOpacity onPress={onMoveUp} style={{ padding: 2 }} activeOpacity={0.7}>
+                  <Ionicons name="chevron-up" size={16} color={C.sub} />
+                </TouchableOpacity>
+              )}
+              {onMoveDown && (
+                <TouchableOpacity onPress={onMoveDown} style={{ padding: 2 }} activeOpacity={0.7}>
+                  <Ionicons name="chevron-down" size={16} color={C.sub} />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+        </View>
       </View>
 
       <View
@@ -69,39 +90,36 @@ export default function LiveMotionBarChart({
               strokeWidth={1}
               strokeDasharray="3,3"
             />
-            <SvgText x={4} y={10} fill={C.sub} fontSize={9}>
-              100
-            </SvgText>
-            <SvgText x={4} y={height - 2} fill={C.sub} fontSize={9}>
-              0
-            </SvgText>
-
-            {/* Vertical Activity Bars */}
+            {/* Motion bars */}
             {safePoints.map((p, idx) => {
+              if (span <= 0) return null;
               const x = ((p.t - t0) / span) * width;
               const v = Math.min(max, Math.max(0, p.v));
-              if (v <= 0) return null;
-              const barHeight = Math.max(4, (v / max) * height);
-              const y = height - barHeight;
+              const h = (v / max) * (height - 6);
+              const y = height - h;
               return (
                 <Line
                   key={idx}
                   x1={x}
                   x2={x}
                   y1={height}
-                  y2={Math.max(0, y)}
+                  y2={y}
                   stroke={accent}
-                  strokeWidth={2}
+                  strokeWidth={1.5}
                 />
               );
             })}
           </Svg>
         )}
       </View>
-
+      {/* Time axis */}
       <View style={styles.timeRow}>
-        <Text style={[styles.time, { color: C.sub }]}>{safePoints.length > 0 ? clock(t0) : ""}</Text>
-        <Text style={[styles.time, { color: C.sub }]}>{safePoints.length > 0 ? clock(tN) : ""}</Text>
+        <Text style={[styles.time, { color: C.sub }]}>
+          {safePoints.length > 0 ? clock(t0) : ""}
+        </Text>
+        <Text style={[styles.time, { color: C.sub }]}>
+          {safePoints.length > 0 ? clock(tN) : ""}
+        </Text>
       </View>
     </View>
   );
@@ -118,18 +136,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "baseline",
-    marginBottom: 2,
+    marginBottom: 4,
   },
-  title: {
-    fontSize: 13,
-    fontWeight: "700",
-  },
+  title: { fontSize: 13, fontWeight: "700" },
   timeRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 2,
+    marginTop: 3,
   },
-  time: {
-    fontSize: 9,
-  },
+  time: { fontSize: 9 },
 });
