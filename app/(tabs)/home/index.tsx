@@ -15,6 +15,9 @@ import {
   View,
   Image,
   Alert,
+  ScrollView,
+  Modal,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as NavigationBar from "expo-navigation-bar";
@@ -22,7 +25,88 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useTheme } from "../../../theme/ThemeProvider";
 import { useTranslation } from "react-i18next";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { DeviceItem, useO2Ring } from "../../../service/O2RingProvider";
+import Constants from "expo-constants";
+import LivePpgWave from "../../../components/live/LivePpgWave";
+import LiveTrendChart, { Band } from "../../../components/live/LiveTrendChart";
+import LiveBpTrendChart from "../../../components/live/LiveBpTrendChart";
+import LiveMotionBarChart from "../../../components/live/LiveMotionBarChart";
+import { useReadingSeries } from "../../../components/live/useReadingSeries";
+import HaemodynamicSummaryCard from "../../../components/live/HaemodynamicSummaryCard";
+import { calculateRespiratoryRate } from "../../../service/HaemodynamicCalculations";
+import { BP_CALIBRATION_KEY } from "../../BpCalibration";
+import { showBpFeature, showRrFeature } from "../../../service/AppVariant";
+
+const isWatchDevice = (name?: string) => {
+  const n = (name || "").toLowerCase().replace(/[\s_-]/g, "");
+  if (n.includes("kidso2") || n.includes("o2ring") || n.includes("wearo2")) return false;
+  return /watch|band|wrist|o2w|checkme|o2m/i.test(n);
+};
+
+const getDeviceImage = (name?: string, model?: number) => {
+  const n = (name || "").toLowerCase().replace(/[\s_-]/g, "");
+  if (n.includes("kidso2")) {
+    return require("../../../assets/images/KidsO2Ring.png");
+  }
+  if (n.includes("o2ring") || n.includes("wearo2")) {
+    return require("../../../assets/images/O2RingBGR.png");
+  }
+  if (isWatchDevice(name) || (model != null && model !== 4 && model !== 2)) {
+    return require("../../../assets/images/O2 Watch.png");
+  }
+  return require("../../../assets/images/O2RingBGR.png");
+};
+
+const getDisplayName = (name?: string, model?: number) => {
+  const base = name || "Device";
+  const n = base.toLowerCase();
+  const parts = base.trim().split(/\s+/);
+  const suffix = parts.length > 1 ? parts[parts.length - 1] : "";
+
+  if (n.startsWith("o2m") || n.includes("o2m")) {
+    return suffix && /^\d+$/.test(suffix) ? `O2WProMax ${suffix}` : "O2WProMax";
+  }
+  if (/^o2\s+\d+/i.test(base) || (n.startsWith("o2 ") && !n.includes("ring"))) {
+    return suffix && /^\d+$/.test(suffix) ? `O2Watch ${suffix}` : "O2Watch";
+  }
+  if (n.includes("kidso2")) {
+    return suffix && /^\d+$/.test(suffix) ? `KidsO2 ${suffix}` : "KidsO2";
+  }
+  if (n.includes("o2ring") || n.includes("o2_ring")) {
+    return suffix && /^\d+$/.test(suffix) ? `O2Ring ${suffix}` : "O2Ring";
+  }
+  if (/watch|band|wrist|o2w|checkme/i.test(n)) {
+    return suffix && /^\d+$/.test(suffix) ? `O2Watch ${suffix}` : "O2Watch";
+  }
+  return base;
+};
+
+// same validity rules as the big numbers: anything else shows "--" and leaves a gap in the chart
+const isValidSpo2 = (v: number) => v >= 20 && v <= 100;
+const isValidPr = (v: number) => v >= 20 && v <= 250;
+const isValidBpVal = (v: number) => v >= 30 && v <= 250;
+
+// line colour by value (cosmetic only; agree the thresholds with the clinical lead)
+const GREEN = "#5BD68A";
+const YELLOW = "#E3D45C";
+const ORANGE = "#F5A25D";
+const AMBER = "#F5B031";
+const SPO2_BANDS: Band[] = [
+  { value: 100, color: GREEN },
+  { value: 94, color: GREEN },
+  { value: 90, color: YELLOW },
+  { value: 86, color: ORANGE },
+  { value: 70, color: ORANGE },
+];
+const PR_BANDS: Band[] = [
+  { value: 250, color: ORANGE },
+  { value: 130, color: ORANGE },
+  { value: 110, color: GREEN },
+  { value: 50, color: GREEN },
+  { value: 40, color: ORANGE },
+  { value: 25, color: ORANGE },
+];
 
 export default function Home() {
   const { colors: C, isDark, fonts: F } = useTheme();
@@ -33,6 +117,15 @@ export default function Home() {
     knownDevices,
     spo2,
     pr,
+    rr,
+    sbp,
+    dbp,
+    isBpStabilizing,
+    calibrationTimes: contextCalibTimes,
+    calibrationCount: contextCalibCount,
+    pi,
+    motion,
+    realtimeUpdatedAt,
     battery,
     batteryState,
     disconnect,
@@ -47,10 +140,38 @@ export default function Home() {
     connecting,
     devices,
     isScanning,
+    spo2Series,
+    prSeries,
+    sbpSeries,
+    dbpSeries,
+    motionSeries,
+    rrSeries,
   } = useO2Ring();
 
   const [knownDeviceMenuVisible, setKnownDeviceMenuVisible] = useState(false);
+  const [isGridFormat, setIsGridFormat] = useState(true);
   const menuScanWasActiveRef = useRef(false);
+
+  const [visibleCharts, setVisibleCharts] = useState({
+    spo2: true,
+    pr: true,
+    bp: showBpFeature,
+    rr: showRrFeature,
+    motion: true,
+    ppg: true,
+  });
+
+  useFocusEffect(
+    useCallback(() => {
+      AsyncStorage.getItem("settings:visible_charts").then((stored) => {
+        if (stored) {
+          try {
+            setVisibleCharts((prev) => ({ ...prev, ...JSON.parse(stored) }));
+          } catch {}
+        }
+      });
+    }, [])
+  );
 
   // Keep latest refreshRealtime without forcing the focus effect to re-run on every reading
   const refreshRealtimeRef = useRef(refreshRealtime);
@@ -116,6 +237,38 @@ export default function Home() {
     router.push("/(tabs)/home/Scan");
   };
 
+  const [calibrationTime, setCalibrationTime] = useState<number | null>(null);
+  const [calibrationTimes, setCalibrationTimes] = useState<number[]>([]);
+  const [calibrationCount, setCalibrationCount] = useState<number>(0);
+
+  const effectiveCalibTimes = contextCalibTimes ?? calibrationTimes;
+  const effectiveCalibCount = contextCalibCount ?? calibrationCount;
+
+  useFocusEffect(
+    useCallback(() => {
+      AsyncStorage.getItem(BP_CALIBRATION_KEY).then((stored) => {
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed.calibrationTimes) && parsed.calibrationTimes.length > 0) {
+              setCalibrationTimes(parsed.calibrationTimes);
+              setCalibrationCount(parsed.calibrationTimes.length);
+              setCalibrationTime(parsed.calibrationTimes[parsed.calibrationTimes.length - 1] ?? null);
+            } else if (parsed.calibrationTime != null) {
+              setCalibrationTimes([parsed.calibrationTime]);
+              setCalibrationCount(1);
+              setCalibrationTime(parsed.calibrationTime);
+            } else {
+              setCalibrationTimes([]);
+              setCalibrationCount(0);
+              setCalibrationTime(null);
+            }
+          } catch {}
+        }
+      }).catch(() => {});
+    }, [])
+  );
+
   // When opening the known devices menu, run a scan so we can flag online/offline status.
   useEffect(() => {
     if (!knownDeviceMenuVisible) return;
@@ -140,39 +293,35 @@ export default function Home() {
    */
   useFocusEffect(
     useCallback(() => {
-      // Start or stop scanning based on connection state; avoid depending on isScanning to prevent setState loops
+      // Start or stop scanning based on connection state
       if (!connectedDevice) {
         startScan();
       } else {
         stopScan();
-      }
-
-      if (!connectedDevice || !isRealtimeReady) {
-        return () => {
-          stopScan();
-        };
-      }
-
-      // call once immediately when screen is focused
-      refreshRealtimeRef.current();
-
-      // then keep calling every 1 second
-      const intervalId = setInterval(() => {
         refreshRealtimeRef.current();
-      }, 1000);
+      }
 
-      // clean up when leaving the screen or losing focus
       return () => {
-        clearInterval(intervalId);
         stopScan();
       };
-    }, [connectedDevice, isRealtimeReady, startScan, stopScan])
+    }, [connectedDevice, startScan, stopScan])
   );
+
+  const isSignalActive = spo2 != null && spo2 >= 20 && pr != null && pr >= 20;
+  const filteredMotion = motion != null ? Math.max(0, motion - 20) : 0;
+  const rrValue = isSignalActive && pr != null && pr > 0 ? calculateRespiratoryRate([pr]) : null;
 
   const displaySpo2 =
     spo2 == null || spo2 < 20 || spo2 > 100 ? "--" : `${spo2}`;
 
   const displayPr = pr == null || pr < 20 || pr > 250 ? "--" : `${pr}`;
+
+  const effectiveStabilizing = isBpStabilizing && isSignalActive;
+  const displaySbp = effectiveStabilizing ? "--" : (!isSignalActive || sbp == null || dbp == null || sbp < 30 || dbp < 20 ? "--" : `${Math.max(sbp, dbp)}`);
+  const displayDbp = effectiveStabilizing ? "--" : (!isSignalActive || sbp == null || dbp == null || sbp < 30 || dbp < 20 ? "--" : `${Math.min(sbp, dbp)}`);
+
+  const displayMotion = filteredMotion === 0 ? "0" : `${filteredMotion}`;
+  const displayRr = rrValue == null ? "--" : `${rrValue}`;
   const batterySegments = useMemo(() => {
     if (battery == null || battery < 0 || battery > 100) {
       return null;
@@ -191,8 +340,15 @@ export default function Home() {
     }
   }, [batteryState]);
 
+  const batteryColor = useMemo(() => {
+    if (batterySegments == null) return C.tint;
+    if (batterySegments >= 4) return "#5BD68A";
+    if (batterySegments >= 2) return "#F5A25D";
+    return "#E74C3C";
+  }, [batterySegments, C.tint]);
+
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={["top", "left", "right"]}>
       {knownDeviceMenuVisible && (
         <SafeAreaView
           style={styles.knownMenuContainer}
@@ -297,19 +453,21 @@ export default function Home() {
                         ]
                       );
                     }}>
-                    <View style={{ flex: 1, flexDirection: "row" }}>
-                      <Image
-                        source={require("../../../assets/images/O2RingBGR.png")}
-                        style={{ width: 40, height: 40, marginRight: 8 }}
-                        resizeMode="contain"
-                      />
+                    <View style={{ flex: 1, flexDirection: "row", alignItems: "center" }}>
+                      <View style={{ backgroundColor: "#ffffff", borderRadius: 8, padding: 4, marginRight: 10 }}>
+                        <Image
+                          source={getDeviceImage(device.name, device.model)}
+                          style={{ width: 36, height: 36 }}
+                          resizeMode="contain"
+                        />
+                      </View>
                       <View style={{justifyContent: "center"}}>
                         <Text
                           style={[
                             styles.knownMenuItemTitle,
                             { color: C.text },
                           ]}>
-                          {device.name}
+                          {getDisplayName(device.name, device.model)}
                         </Text>
                       </View>
                     </View>
@@ -342,7 +500,7 @@ export default function Home() {
 
       {connectedDevice ? (
         // Connected view
-        <View>
+        <ScrollView contentContainerStyle={{ paddingBottom: 8, maxWidth: 680, width: "100%", alignSelf: "center" }}>
           <View style={styles.titleContainer}>
             <View style={styles.titleRow}>
               <View style={styles.titleLeft}>
@@ -358,28 +516,30 @@ export default function Home() {
                   onPress={() =>
                     setKnownDeviceMenuVisible(!knownDeviceMenuVisible)
                   }>
-                  <Image
-                    source={require("../../../assets/images/O2RingBGR.png")}
-                    resizeMode="contain"
-                    style={{
-                      width: 56,
-                      height: 56,
-                      marginRight: 0,
-                    }}
-                  />
+                  <View style={{ backgroundColor: "#ffffff", borderRadius: 8, padding: 4 }}>
+                    <Image
+                      key={connectedDevice?.mac ?? "connected-device-image"}
+                      source={getDeviceImage(connectedDevice?.name, connectedDevice?.model)}
+                      resizeMode="contain"
+                      style={{
+                        width: 40,
+                        height: 40,
+                      }}
+                    />
+                  </View>
                   <View style={[styles.badge, { backgroundColor: C.tint }]}>
                     <MaterialCommunityIcons
                       name="swap-horizontal"
-                      size={16}
+                      size={14}
                       color={C.white}
                     />
                   </View>
                 </Pressable>
-                <View style={{ marginLeft: 16 }}>
-                  <Text style={[F.buttonText, { color: C.text }]}>
-                    {connectedDevice.name}
+                <View style={{ marginLeft: 8, flex: 1, justifyContent: "center" }}>
+                  <Text style={{ fontSize: 13, fontWeight: "700", color: C.text }} numberOfLines={1}>
+                    {getDisplayName(connectedDevice?.name, connectedDevice?.model)}
                   </Text>
-                  <Text style={[F.buttonText, { color: C.text }]}>
+                  <Text style={{ fontSize: 12, fontWeight: "600", color: C.tint, marginTop: 2 }} numberOfLines={1}>
                     {t("connected")}
                   </Text>
                 </View>
@@ -388,66 +548,296 @@ export default function Home() {
               <View
                 style={[
                   styles.batteryChip,
-                  { borderColor: C.border, backgroundColor: C.bg2 },
+                  { borderColor: batteryColor, backgroundColor: C.bg2 },
                 ]}>
                 <MaterialCommunityIcons
                   name={batteryIconName}
-                  size={22}
-                  color={C.text}
+                  size={16}
+                  color={batteryColor}
                 />
                 {batterySegments == null ? (
                   <Text style={[styles.batteryText, { color: C.tint }]}>
                     --
                   </Text>
                 ) : (
-                  <View style={styles.batteryBlocks}>
-                    {Array.from({ length: 5 }).map((_, idx) => (
-                      <View
-                        key={idx}
-                        style={[
-                          styles.batteryBlock,
-                          {
-                            marginLeft: idx === 0 ? 0 : 3,
-                            backgroundColor:
-                              idx < batterySegments ? C.tint : "transparent",
-                            borderColor: C.border,
-                            opacity: idx < batterySegments ? 1 : 0.35,
-                          },
-                        ]}
-                      />
-                    ))}
+                  <View style={{ flexDirection: "row", alignItems: "center" }}>
+                    <View style={styles.batteryBlocks}>
+                      {Array.from({ length: 5 }).map((_, idx) => (
+                        <View
+                          key={idx}
+                          style={[
+                            styles.batteryBlock,
+                            {
+                              marginLeft: idx === 0 ? 0 : 2,
+                              backgroundColor:
+                                idx < batterySegments ? batteryColor : "transparent",
+                              borderColor: batteryColor,
+                              opacity: idx < batterySegments ? 1 : 0.3,
+                            },
+                          ]}
+                        />
+                      ))}
+                    </View>
+                    {battery != null && (
+                      <Text style={[styles.batteryText, { color: batteryColor, marginLeft: 4, fontSize: 11, fontWeight: "700" }]}>
+                        {battery}%
+                      </Text>
+                    )}
                   </View>
                 )}
               </View>
             </View>
           </View>
 
-          {/* Live Display */}
-          <View style={{ paddingHorizontal: 16 }}>
-            <View style={[styles.card, { backgroundColor: C.bg2 }]}>
-              <Text style={[styles.label, { color: C.text }]}>SpO2</Text>
-              <Text style={[styles.value, { color: C.tint }]}>
-                {displaySpo2} %
+          {/* Sub-header row: Format Button on left, PI on right (100% level with each other) */}
+          <View style={{ paddingHorizontal: 10, marginBottom: 8, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <TouchableOpacity
+              onPress={() => setIsGridFormat((prev) => !prev)}
+              style={[
+                styles.batteryChip,
+                { borderColor: C.border, backgroundColor: C.bg2, paddingHorizontal: 10, paddingVertical: 5 },
+              ]}
+              activeOpacity={0.8}>
+              <MaterialCommunityIcons
+                name={isGridFormat ? "view-agenda" : "view-grid"}
+                size={18}
+                color={C.tint}
+              />
+              <Text style={{ fontSize: 12, fontWeight: "600", color: C.text, marginLeft: 6 }}>
+                {isGridFormat ? "Grid View" : "Stacked View"}
               </Text>
-            </View>
+            </TouchableOpacity>
 
-            <View style={[styles.card, { backgroundColor: C.bg2 }]}>
-              <Text style={[styles.label, { color: C.text }]}>
-                {t("pulseRate")}
-              </Text>
-              <Text style={[styles.value, { color: C.tint }]}>
-                {displayPr} bpm
+            <View
+              style={[
+                styles.batteryChip,
+                { borderColor: C.border, backgroundColor: C.bg2, paddingHorizontal: 12, paddingVertical: 5 },
+              ]}>
+              <Text style={{ fontSize: 12, fontWeight: "700", color: GREEN }}>
+                PI: {isSignalActive && pi != null ? `${pi.toFixed(1)}%` : "--"}
               </Text>
             </View>
+          </View>
+
+          {/* Live Display */}
+          <View style={{ paddingHorizontal: 10 }}>
+            {!isGridFormat ? (
+              // Format 1: Stacked (Compact to fit on one screen)
+              <>
+                {visibleCharts.spo2 && (
+                  <LiveTrendChart
+                    key="chart-spo2"
+                    title="O2 Level"
+                    unit="%"
+                    currentLabel={displaySpo2}
+                    avgLabel={t("avg")}
+                    points={spo2Series}
+                    min={70}
+                    max={100}
+                    ticks={[100, 90, 80, 70]}
+                    bands={SPO2_BANDS}
+                    accent={C.tint}
+                    height={38}
+                  />
+                )}
+
+                {visibleCharts.pr && (
+                  <LiveTrendChart
+                    key="chart-pr"
+                    title="PR"
+                    unit="bpm"
+                    currentLabel={displayPr}
+                    avgLabel={t("avg")}
+                    points={prSeries}
+                    min={25}
+                    max={250}
+                    ticks={[250, 125, 25]}
+                    bands={PR_BANDS}
+                    accent={AMBER}
+                    height={38}
+                  />
+                )}
+
+                {visibleCharts.bp && (
+                  <LiveBpTrendChart
+                    key="chart-bp"
+                    title="BP"
+                    unit="mmHg"
+                    currentSbp={displaySbp}
+                    currentDbp={displayDbp}
+                    sbpPoints={sbpSeries}
+                    dbpPoints={dbpSeries}
+                    height={38}
+                    calibrationTime={calibrationTime}
+                    calibrationTimes={effectiveCalibTimes}
+                    calibrationCount={effectiveCalibCount}
+                    extraHeaderLabel={effectiveStabilizing ? "Stabilizing..." : undefined}
+                    onPressCalibration={() => router.push("/BpCalibration?from=home")}
+                  />
+                )}
+
+                {visibleCharts.rr && (
+                  <LiveTrendChart
+                    key="chart-rr"
+                    title="RR"
+                    unit="bpm"
+                    currentLabel={displayRr}
+                    avgLabel={t("avg")}
+                    points={rrSeries}
+                    min={5}
+                    max={40}
+                    ticks={[40, 20, 5]}
+                    bands={[{ value: 40, color: C.tint }, { value: 5, color: C.tint }]}
+                    accent={C.tint}
+                    height={38}
+                    windowMs={30000}
+                  />
+                )}
+
+                {visibleCharts.motion && (
+                  <LiveMotionBarChart
+                    key="chart-motion"
+                    title="Motion"
+                    currentLabel={displayMotion}
+                    points={motionSeries}
+                    height={38}
+                  />
+                )}
+
+                {visibleCharts.ppg && (
+                  <LivePpgWave
+                    key="chart-ppg"
+                    active={isRealtimeReady}
+                    title="PPG"
+                    waitingText={t("waitingForSignal")}
+                    height={38}
+                  />
+                )}
+              </>
+            ) : (
+              // Format 2: 2-Column Grid (Bigger charts)
+              <>
+                {(visibleCharts.spo2 || visibleCharts.bp) && (
+                  <View key="row-1" style={styles.gridRow}>
+                    {visibleCharts.spo2 && (
+                      <View style={styles.gridCol}>
+                        <LiveTrendChart
+                          key="grid-spo2"
+                          title="O2 Level"
+                          unit="%"
+                          currentLabel={displaySpo2}
+                          avgLabel={t("avg")}
+                          points={spo2Series}
+                          min={70}
+                          max={100}
+                          ticks={[100, 90, 80, 70]}
+                          bands={SPO2_BANDS}
+                          accent={C.tint}
+                          height={48}
+                        />
+                      </View>
+                    )}
+                    {visibleCharts.bp && (
+                      <View style={styles.gridCol}>
+                        <LiveBpTrendChart
+                          key="grid-bp"
+                          title="BP"
+                          unit="mmHg"
+                          currentSbp={displaySbp}
+                          currentDbp={displayDbp}
+                          sbpPoints={sbpSeries}
+                          dbpPoints={dbpSeries}
+                          height={48}
+                          calibrationTime={calibrationTime}
+                          calibrationTimes={effectiveCalibTimes}
+                          calibrationCount={effectiveCalibCount}
+                          extraHeaderLabel={effectiveStabilizing ? "Stabilizing..." : undefined}
+                          onPressCalibration={() => router.push("/BpCalibration?from=home")}
+                        />
+                      </View>
+                    )}
+                  </View>
+                )}
+
+                {(visibleCharts.pr || visibleCharts.rr) && (
+                  <View key="row-2" style={styles.gridRow}>
+                    {visibleCharts.pr && (
+                      <View style={styles.gridCol}>
+                        <LiveTrendChart
+                          key="grid-pr"
+                          title="PR"
+                          unit="bpm"
+                          currentLabel={displayPr}
+                          avgLabel={t("avg")}
+                          points={prSeries}
+                          min={25}
+                          max={250}
+                          ticks={[250, 125, 25]}
+                          bands={PR_BANDS}
+                          accent={AMBER}
+                          height={48}
+                        />
+                      </View>
+                    )}
+                    {visibleCharts.rr && (
+                      <View style={styles.gridCol}>
+                        <LiveTrendChart
+                          key="grid-rr"
+                          title="RR"
+                          unit="bpm"
+                          currentLabel={displayRr}
+                          avgLabel={t("avg")}
+                          points={rrSeries}
+                          min={5}
+                          max={40}
+                          ticks={[40, 20, 5]}
+                          bands={[{ value: 40, color: C.tint }, { value: 5, color: C.tint }]}
+                          accent={C.tint}
+                          height={48}
+                          windowMs={30000}
+                        />
+                      </View>
+                    )}
+                  </View>
+                )}
+
+                {(visibleCharts.motion || visibleCharts.ppg) && (
+                  <View key="row-3" style={styles.gridRow}>
+                    {visibleCharts.motion && (
+                      <View style={styles.gridCol}>
+                        <LiveMotionBarChart
+                          key="grid-motion"
+                          title="Motion"
+                          currentLabel={displayMotion}
+                          points={motionSeries}
+                          height={48}
+                        />
+                      </View>
+                    )}
+                    {visibleCharts.ppg && (
+                      <View style={styles.gridCol}>
+                        <LivePpgWave
+                          key="grid-ppg"
+                          active={isRealtimeReady}
+                          title="PPG"
+                          waitingText={t("waitingForSignal")}
+                          height={48}
+                        />
+                      </View>
+                    )}
+                  </View>
+                )}
+              </>
+            )}
 
             <TouchableOpacity
               onPress={handleDisconnect}
-              style={[styles.button, { backgroundColor: C.danger }]}
+              style={[styles.button, { backgroundColor: C.danger, paddingVertical: 10, marginTop: 4 }]}
               activeOpacity={0.85}>
               <Text style={[F.buttonText]}>{t("disconnect")}</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </ScrollView>
       ) : (
         // Not connected view
         <View style={styles.centerTop}>
@@ -466,6 +856,9 @@ export default function Home() {
             activeOpacity={0.85}>
             <Text style={[F.buttonText]}>{t("connectDevice")}</Text>
           </TouchableOpacity>
+          <Text style={{ color: C.sub, fontSize: 12, marginTop: 8 }}>
+            v{Constants.expoConfig?.version ?? "1.2.7"}
+          </Text>
         </View>
       )}
     </SafeAreaView>
@@ -482,7 +875,8 @@ const styles = StyleSheet.create({
   titleLeft: {
     flexDirection: "row",
     alignItems: "center",
-    flexShrink: 1,
+    flex: 1,
+    marginRight: 6,
   },
 
   badge: {
@@ -517,28 +911,36 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  gridRow: {
+    flexDirection: "row",
+    gap: 6,
+    marginBottom: 4,
+  },
+  gridCol: {
+    flex: 1,
+  },
   batteryChip: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
   },
   batteryText: {
-    fontSize: 16,
+    fontSize: 11,
     fontWeight: "700",
-    marginLeft: 8,
+    marginLeft: 4,
   },
   batteryBlocks: {
     flexDirection: "row",
     alignItems: "center",
-    marginLeft: 8,
+    marginLeft: 4,
   },
   batteryBlock: {
-    width: 8,
-    height: 12,
-    borderRadius: 2,
+    width: 4,
+    height: 9,
+    borderRadius: 1,
     borderWidth: StyleSheet.hairlineWidth,
   },
   card: {

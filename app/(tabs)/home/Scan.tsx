@@ -1,12 +1,13 @@
 import React, { useMemo, useCallback } from "react";
 import {
   ActivityIndicator,
-  FlatList,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
   Image,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -15,19 +16,65 @@ import { useTranslation } from "react-i18next";
 import { useTheme } from "../../../theme/ThemeProvider";
 import { DeviceItem, useO2Ring } from "../../../service/O2RingProvider";
 
+const isWatchDevice = (name?: string) => {
+  const n = (name || "").toLowerCase().replace(/[\s_-]/g, "");
+  if (n.includes("kidso2") || n.includes("o2ring") || n.includes("wearo2")) return false;
+  return /watch|band|wrist|o2w|checkme|o2m/i.test(n);
+};
+
+const getDeviceImage = (name?: string, model?: number) => {
+  const n = (name || "").toLowerCase().replace(/[\s_-]/g, "");
+  if (n.includes("kidso2")) {
+    return require("../../../assets/images/KidsO2Ring.png");
+  }
+  if (n.includes("o2ring") || n.includes("wearo2")) {
+    return require("../../../assets/images/O2RingBGR.png");
+  }
+  if (isWatchDevice(name) || (model != null && model !== 4 && model !== 2)) {
+    return require("../../../assets/images/O2 Watch.png");
+  }
+  return require("../../../assets/images/O2RingBGR.png");
+};
+
+const getDisplayName = (name?: string, model?: number) => {
+  const base = name || "Device";
+  const n = base.toLowerCase();
+  const parts = base.trim().split(/\s+/);
+  const suffix = parts.length > 1 ? parts[parts.length - 1] : "";
+
+  if (n.startsWith("o2m") || n.includes("o2m")) {
+    return suffix && /^\d+$/.test(suffix) ? `O2WProMax ${suffix}` : "O2WProMax";
+  }
+  if (/^o2\s+\d+/i.test(base) || (n.startsWith("o2 ") && !n.includes("ring"))) {
+    return suffix && /^\d+$/.test(suffix) ? `O2Watch ${suffix}` : "O2Watch";
+  }
+  if (n.includes("kidso2")) {
+    return suffix && /^\d+$/.test(suffix) ? `KidsO2 ${suffix}` : "KidsO2";
+  }
+  if (n.includes("o2ring") || n.includes("o2_ring")) {
+    return suffix && /^\d+$/.test(suffix) ? `O2Ring ${suffix}` : "O2Ring";
+  }
+  if (/watch|band|wrist|o2w|checkme/i.test(n)) {
+    return suffix && /^\d+$/.test(suffix) ? `O2Watch ${suffix}` : "O2Watch";
+  }
+  return base;
+};
+
 type DeviceRowProps = {
   item: DeviceItem;
   onPress: (item: DeviceItem) => void;
+  onLongPress?: (item: DeviceItem) => void;
   disabled?: boolean;
   connecting?: boolean;
 };
 
-function DeviceRow({ item, onPress, disabled, connecting }: DeviceRowProps) {
+function DeviceRow({ item, onPress, onLongPress, disabled, connecting }: DeviceRowProps) {
   const { colors: C, fonts: F } = useTheme();
 
   return (
     <TouchableOpacity
       onPress={() => onPress(item)}
+      onLongPress={() => onLongPress?.(item)}
       style={[
         disabled ? styles.deviceRowDisabled : null,
         connecting ? styles.deviceRowConnecting : null,
@@ -37,28 +84,35 @@ function DeviceRow({ item, onPress, disabled, connecting }: DeviceRowProps) {
           alignItems: "center",
           padding: 12,
           borderRadius: 12,
-          marginBottom: 2,
+          marginBottom: 8,
         },
       ]}
       activeOpacity={0.8}
       disabled={disabled}>
-      <Image
-        source={require("../../../assets/images/O2RingBGR.png")}
-        style={{ width: 40, height: 40, marginRight: 8 }}
-        resizeMode="contain"
-      />
-      <View style={{ flex: 1 }}>
-        <Text style={[F.text, { color: C.white }]}>{item.name}</Text>
+      <View key="row-icon" style={{ backgroundColor: "#ffffff", borderRadius: 8, padding: 4, marginRight: 10 }}>
+        <Image
+          key={item.mac}
+          source={getDeviceImage(item.name, item.model)}
+          style={{ width: 36, height: 36 }}
+          resizeMode="contain"
+        />
       </View>
-      {connecting ? (
-        <ActivityIndicator color={C.white} />
-      ) : (
+      <View key="row-text" style={{ flex: 1, marginRight: 8 }}>
+        <Text style={{ fontSize: 14, fontWeight: "600", color: C.white }} numberOfLines={1}>
+          {getDisplayName(item.name, item.model)}
+        </Text>
+      </View>
+      <View style={{ width: 24, height: 24, alignItems: "center", justifyContent: "center" }}>
+        {connecting && (
+          <ActivityIndicator style={StyleSheet.absoluteFill} color={C.white} size="small" />
+        )}
         <MaterialCommunityIcons
           name="chevron-right"
           color={C.white}
           size={24}
+          style={{ opacity: connecting ? 0 : 1 }}
         />
-      )}
+      </View>
     </TouchableOpacity>
   );
 }
@@ -69,26 +123,32 @@ export default function ScanDeviceScreen() {
   const router = useRouter();
   const {
     devices,
+    knownDevices,
     isScanning,
     connecting,
     startScan,
     stopScan,
     connectToDevice,
-    clearDevices,
+    forgetDevice,
   } = useO2Ring();
 
   // Ensure scanning starts whenever this screen is focused (and stops on blur)
   useFocusEffect(
     useCallback(() => {
-      clearDevices();
       startScan();
       return () => {
         stopScan();
       };
-    }, [clearDevices, startScan, stopScan])
+    }, [startScan, stopScan])
   );
 
-  const hasDevices = useMemo(() => devices.length > 0, [devices]);
+  const liveScanned = devices;
+  const savedDevices = useMemo(
+    () => knownDevices.filter((k) => !devices.some((d) => d.mac === k.mac)),
+    [devices, knownDevices]
+  );
+
+  const hasAnyDevices = liveScanned.length > 0 || savedDevices.length > 0;
 
   async function handleConnect(item: DeviceItem) {
     const ok = await connectToDevice(item);
@@ -96,6 +156,23 @@ export default function ScanDeviceScreen() {
       router.back();
     }
   }
+
+  const handleDeleteSaved = (item: DeviceItem) => {
+    Alert.alert(
+      t("confirmDeleteTitle"),
+      t("deleteKnownDeviceMessage"),
+      [
+        { text: t("cancel"), style: "cancel" },
+        {
+          text: t("delete"),
+          style: "destructive",
+          onPress: () => {
+            forgetDevice(item);
+          },
+        },
+      ]
+    );
+  };
 
   async function handleScanToggle() {
     if (isScanning) {
@@ -108,16 +185,11 @@ export default function ScanDeviceScreen() {
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: C.bg, padding: 16 }]}>
-      {/* This wrapper controls vertical position */}
-      <View
-        style={[
-          styles.content,
-          !hasDevices && styles.contentCentered, // center when no devices
-        ]}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
         <View style={styles.header}>
           <MaterialCommunityIcons
             name="radar"
-            size={hasDevices ? 40 : 80}
+            size={56}
             color={C.tint}
           />
 
@@ -128,8 +200,8 @@ export default function ScanDeviceScreen() {
               backgroundColor: isScanning ? C.danger : C.tint,
               flexDirection: "row",
               marginTop: 8,
-              paddingHorizontal: 15,
-              height: 48,
+              paddingHorizontal: 18,
+              height: 44,
               borderRadius: 12,
               alignItems: "center",
               justifyContent: "center",
@@ -144,31 +216,60 @@ export default function ScanDeviceScreen() {
           </TouchableOpacity>
         </View>
 
-        {!hasDevices ? (
+        {!hasAnyDevices ? (
           <View
             style={{
               alignItems: "center",
               justifyContent: "center",
+              marginTop: 30,
             }}>
-            <Text style={{ color: C.sub }}>{t("noDevices")}</Text>
+            <Text style={{ color: C.sub, fontSize: 14 }}>{t("noDevices")}</Text>
           </View>
         ) : (
-          <FlatList
-            data={devices}
-            keyExtractor={(item) => item.mac}
-            renderItem={({ item }) => (
-              <DeviceRow
-                item={item}
-                onPress={handleConnect}
-                disabled={connecting}
-                connecting={connecting}
-              />
+          <View style={{ marginTop: 8 }}>
+            {/* Section 1: Live Scanned Devices */}
+            <View style={{ marginBottom: 16 }}>
+              <Text style={{ fontSize: 13, fontWeight: "700", color: C.sub, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                Scanned Devices ({liveScanned.length})
+              </Text>
+              {liveScanned.length === 0 ? (
+                <Text style={{ color: C.sub, fontSize: 12, fontStyle: "italic", marginBottom: 8 }}>
+                  {isScanning ? "Scanning for nearby devices..." : "No live devices found in the air"}
+                </Text>
+              ) : (
+                liveScanned.map((item, idx) => (
+                  <DeviceRow
+                    key={`live-${item.mac || idx}`}
+                    item={item}
+                    onPress={handleConnect}
+                    disabled={connecting}
+                    connecting={connecting}
+                  />
+                ))
+              )}
+            </View>
+
+            {/* Section 2: Saved / Paired Devices */}
+            {savedDevices.length > 0 && (
+              <View style={{ marginTop: 8 }}>
+                <Text style={{ fontSize: 13, fontWeight: "700", color: C.sub, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                  Saved Devices ({savedDevices.length})
+                </Text>
+                {savedDevices.map((item, idx) => (
+                  <DeviceRow
+                    key={`saved-${item.mac || idx}`}
+                    item={item}
+                    onPress={handleConnect}
+                    onLongPress={handleDeleteSaved}
+                    disabled={connecting}
+                    connecting={connecting}
+                  />
+                ))}
+              </View>
             )}
-            ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-            contentContainerStyle={{ paddingVertical: 12 }}
-          />
+          </View>
         )}
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -178,24 +279,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  content: {
-    flex: 1,
-  },
-
-  contentCentered: {
-    justifyContent: "center",
-  },
-
   header: {
-    marginBottom: 16,
+    marginBottom: 12,
     justifyContent: "center",
     alignItems: "center",
-  },
-
-  title: {
-    fontSize: 22,
-    fontWeight: "800",
-    marginTop: 6,
   },
 
   deviceRowDisabled: {

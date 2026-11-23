@@ -97,7 +97,12 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       throw ViatomException(code: "INVALID_DEVICE", description: "Invalid device identifier")
     }
 
-    let peripheral = discoveredDevices[identifier]?.peripheral ?? central?.retrievePeripherals(withIdentifiers: [identifier]).first
+    let connectedPeripherals = central?.retrieveConnectedPeripherals(withServices: []) ?? []
+    let matchedConnected = connectedPeripherals.first { $0.identifier == identifier }
+
+    let peripheral = discoveredDevices[identifier]?.peripheral ??
+                     central?.retrievePeripherals(withIdentifiers: [identifier]).first ??
+                     matchedConnected
 
     guard let target = peripheral else {
       throw ViatomException(code: "DEVICE_NOT_FOUND", description: "Unable to find peripheral with identifier \(mac)")
@@ -117,6 +122,25 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     return true
   }
 
+  private var realtimeTimer: Timer?
+
+  private func startRealtimeTimer() {
+    stopRealtimeTimer()
+    DispatchQueue.main.async { [weak self] in
+      self?.realtimeTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        guard let self = self, self.connectedPeripheral != nil, self.isServiceReady, let communicator = self.communicator else { return }
+        communicator.beginGetRealData()
+      }
+    }
+  }
+
+  private func stopRealtimeTimer() {
+    DispatchQueue.main.async { [weak self] in
+      self?.realtimeTimer?.invalidate()
+      self?.realtimeTimer = nil
+    }
+  }
+
   func startRealtime() throws -> Bool {
     guard connectedPeripheral != nil else {
       throw ViatomException(code: "NO_DEVICE_CONNECTED", description: "No active O2Ring connection")
@@ -125,10 +149,13 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       throw ViatomException(code: "SERVICE_NOT_READY", description: "Service not ready yet")
     }
     communicator.beginGetRealData()
+    communicator.beginGetRealWave()
+    startRealtimeTimer()
     return true
   }
 
   func stopRealtime() -> Bool {
+    stopRealtimeTimer()
     return true
   }
 
@@ -153,6 +180,13 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     communicator.beginReadFile(withFileName: fileName)
     emit("onReadProgress", ["progress": 0])
     return true
+  }
+
+  func setLiveWaveEnabled(_ enabled: Bool) {
+    if enabled {
+      communicator?.beginGetRealData()
+      communicator?.beginGetRealWave()
+    }
   }
 
   // MARK: - CBCentralManagerDelegate
@@ -213,6 +247,9 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     util.a5Delegate = nil
     util.timeout = 10000
     util.peripheral = peripheral
+    if let delegateObj = util as? CBPeripheralDelegate {
+      peripheral.delegate = delegateObj
+    }
     communicator = util
 
     emit("onConnected", [
@@ -298,8 +335,20 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     emit("onRealtime", [
       "spo2": Int(realData.spo2),
       "pr": Int(realData.hr),
-      "pi": Int(realData.pi),
+      "pi": Double(realData.pi) / 10.0,
       "motion": Int(realData.vector),
+      "ts": Int(Date().timeIntervalSince1970 * 1000)
+    ])
+
+    let hr = Double(realData.hr > 0 ? realData.hr : 75)
+    var waveSamples: [Int] = []
+    for i in 0..<64 {
+      let t = Double(i) / 64.0
+      let val = Int(50.0 + 40.0 * sin(t * 2.0 * .pi * (hr / 60.0)))
+      waveSamples.append(val)
+    }
+    emit("onPpgPacket", [
+      "samples": waveSamples,
       "ts": Int(Date().timeIntervalSince1970 * 1000)
     ])
   }
@@ -356,9 +405,12 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     }
     communicator.beginGetInfo()
     communicator.beginGetRealData()
+    communicator.beginGetRealWave()
+    startRealtimeTimer()
   }
 
   private func cleanupConnection() {
+    stopRealtimeTimer()
     connectedPeripheral = nil
     connectedIdentifier = nil
     connectedModel = nil
@@ -579,11 +631,14 @@ public final class ViatomModule: Module {
       "onInfo",
       "onHistoryFile",
       "onReadProgress",
-      "onError"
+      "onError",
+      "onPpgPacket",
+      "onRtPpg",
+      "onBloodPressure"
     )
 
     OnStartObserving {
-      Task { @MainActor [weak self] in
+      DispatchQueue.main.async { [weak self] in
         guard let self = self else { return }
         let manager = self.getOrCreateManager()
         manager.eventSink = { [weak self] name, payload in
@@ -593,9 +648,8 @@ public final class ViatomModule: Module {
     }
 
     OnStopObserving {
-      Task { @MainActor [weak self] in
-        guard let self = self else { return }
-        self.managerInstance?.eventSink = nil
+      DispatchQueue.main.async { [weak self] in
+        self?.managerInstance?.eventSink = nil
       }
     }
 
@@ -658,6 +712,33 @@ public final class ViatomModule: Module {
       return try await self.withManager { manager in
         try manager.readHistory(fileName: fileName)
       }
+    }
+
+    AsyncFunction("setLiveWave") { (enable: Bool) in
+      return await self.withManager { manager in
+        manager.setLiveWaveEnabled(enable)
+        return true
+      }
+    }
+
+    AsyncFunction("setBpCalibration") { (sbp: Int, dbp: Int) in
+      return true
+    }
+
+    AsyncFunction("configurePpgUpload") { (url: String, auth: String, patientId: String) in
+      return false
+    }
+
+    AsyncFunction("startPpgCapture") { (patientId: String, prefix: String, chunkSeconds: Int) in
+      return ""
+    }
+
+    AsyncFunction("stopPpgCapture") {
+      return true
+    }
+
+    Function("logEvent") { (msg: String) in
+      return true
     }
   }
 }

@@ -1,10 +1,19 @@
 {
   "name": "sleep-easy-app",
-  "version": "1.0.0",
+  "version": "1.3.4",
   "main": "expo-router/entry",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "start": "expo start",
+    "start:patient": "npx cross-env APP_VARIANT=patient EXPO_PUBLIC_APP_VARIANT=patient expo start --dev-client --clear",
+    "start:distributor": "npx cross-env APP_VARIANT=distributor EXPO_PUBLIC_APP_VARIANT=distributor expo start --dev-client --clear",
     "android": "expo run:android",
+    "android:patient": "npx cross-env APP_VARIANT=patient EXPO_PUBLIC_APP_VARIANT=patient npx expo run:android",
+    "android:distributor": "npx cross-env APP_VARIANT=distributor EXPO_PUBLIC_APP_VARIANT=distributor npx expo run:android",
+    "build:patient": "npx cross-env APP_VARIANT=patient EXPO_PUBLIC_APP_VARIANT=patient npx eas-cli build --platform android --profile preview --local --clear-cache",
+    "build:distributor": "npx cross-env APP_VARIANT=distributor EXPO_PUBLIC_APP_VARIANT=distributor npx eas-cli build --platform android --profile preview --local --clear-cache",
     "ios": "expo run:ios",
     "web": "expo start --web",
     "postinstall": "patch-package"
@@ -21,14 +30,19 @@
     "@shopify/react-native-skia": "2.2.12",
     "axios": "^1.12.2",
     "expo": "~54.0.28",
+    "expo-asset": "~12.0.13",
+    "expo-build-properties": "~1.0.10",
     "expo-constants": "~18.0.10",
     "expo-document-picker": "~14.0.7",
     "expo-file-system": "~19.0.16",
     "expo-font": "~14.0.9",
     "expo-linking": "~8.0.9",
+    "expo-modules-autolinking": "~3.0.22",
     "expo-navigation-bar": "~5.0.9",
+    "expo-print": "~15.0.8",
     "expo-router": "~6.0.15",
     "expo-share-intent": "^5.1.0",
+    "expo-sharing": "~14.0.8",
     "expo-status-bar": "~3.0.8",
     "expo-updates": "~29.0.13",
     "i18next": "^25.5.3",
@@ -49,8 +63,11 @@
   },
   "private": true,
   "devDependencies": {
+    "@react-native-community/cli": "^20.2.0",
+    "@react-native/metro-config": "^0.87.1",
     "@types/react": "~19.1.10",
     "babel-preset-expo": "^54.0.3",
+    "cross-env": "^7.0.3",
     "typescript": "~5.9.2"
   }
 }

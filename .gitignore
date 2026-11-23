@@ -10,6 +10,7 @@ web-build/
 expo-env.d.ts
 
 # Native
+ios/
 .kotlin/
 *.orig.*
 *.jks
@@ -37,7 +38,6 @@ yarn-error.*
 *.tsbuildinfo
 
 # Android build artifacts
-android/.gradle/
 android/.cxx/
 android/app/build/
 packages/viatom-o2ring/.gradle/

@@ -11,23 +11,36 @@ import {
   Text,
   Alert,
   TextInput,
+  ScrollView,
+  Pressable,
+  Share,
+  Platform,
+  ToastAndroid,
+  Modal,
+  TouchableOpacity,
 } from "react-native";
+import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { CartesianChart, Line } from "victory-native";
 import { File as ExpoFile } from "expo-file-system";
 import { useTranslation } from "react-i18next";
-import { getO2dataDir } from "../../../service/History";
+import { getO2dataDir, uploadCsv } from "../../../service/History";
+import { generateAndReturnPdfUri } from "../../../service/PdfReportGenerator";
+import * as Sharing from "expo-sharing";
+import { API_DEV, API_PROD } from "@env";
 import { useFont } from "@shopify/react-native-skia";
 
-type Row = { t: number; spo2: number; pr: number }; // ms timestamp, SpO2, Pulse
+const rawBase = API_DEV || API_PROD;
+const baseURL = rawBase?.replace(/\/+$/, "");
+
+type Row = { t: number; spo2: number; pr: number; motion?: number }; // ms timestamp, SpO2, Pulse, Motion
+type PpgRow = { index: number; ppg: number }; // Sample Index, Raw PPG Value
 
 const { height } = Dimensions.get("window");
 
 /**
  * Parse Date Time into epoch ms number
- * Returns null if it can't parse.
  */
 function parseNonISOTime(timeStr: string): number | null {
-  // Most recent app downloads store timestamps as "YYYY-MM-DD HH:mm:ss"
   {
     const m = timeStr.match(
       /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/
@@ -35,7 +48,7 @@ function parseNonISOTime(timeStr: string): number | null {
     if (m) {
       const [, yyyyStr, monStr, ddStr, hhStr, mmStr, ssStr] = m;
       const yyyy = Number(yyyyStr);
-      const mon = Number(monStr) - 1; // JS months are 0-based
+      const mon = Number(monStr) - 1;
       const dd = Number(ddStr);
       const hh = Number(hhStr);
       const min = Number(mmStr);
@@ -45,27 +58,15 @@ function parseNonISOTime(timeStr: string): number | null {
     }
   }
 
-  // ISO-ish formats (e.g. 2025-10-21T01:34:42Z or with offset)
   {
     const iso = Date.parse(timeStr);
     if (!Number.isNaN(iso)) return iso;
   }
 
-  // Try "HH:MM:SS Mon DD YYYY"
   {
     const months: Record<string, number> = {
-      Jan: 0,
-      Feb: 1,
-      Mar: 2,
-      Apr: 3,
-      May: 4,
-      Jun: 5,
-      Jul: 6,
-      Aug: 7,
-      Sep: 8,
-      Oct: 9,
-      Nov: 10,
-      Dec: 11,
+      Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
+      Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
     };
 
     const m = timeStr.match(
@@ -87,7 +88,6 @@ function parseNonISOTime(timeStr: string): number | null {
     }
   }
 
-  // Try "HH:MM:SS DD/MM/YYYY"
   {
     const m = timeStr.match(
       /^(\d{2}):(\d{2}):(\d{2})\s+(\d{2})\/(\d{2})\/(\d{4})$/
@@ -99,9 +99,8 @@ function parseNonISOTime(timeStr: string): number | null {
       const yyyy = Number(yyyyStr);
       const hh = Number(HH);
       const min = Number(MM);
-      const ss = 0;
 
-      const ms = new Date(yyyy, monthIndex, dd, hh, min, ss).getTime();
+      const ms = new Date(yyyy, monthIndex, dd, hh, min, 0).getTime();
       if (!Number.isNaN(ms)) return ms;
     }
   }
@@ -110,18 +109,17 @@ function parseNonISOTime(timeStr: string): number | null {
 }
 
 /**
- * Parse CSV text into rows for graphing
- * @param csvText The entire CSV text
+ * Parse standard SpO2 / PR CSV text into rows
  */
 function parseCsvToRows(csvText: string): Row[] {
   const lines = csvText.replace(/\r\n?/g, "\n").split("\n").filter(Boolean);
   if (lines.length <= 1) return [];
 
-  // Headers
   const header = lines[0].split(",").map((h) => h.trim());
   const idxTime = header.findIndex((h) => /^time$/i.test(h));
   const idxSpO2 = header.findIndex((h) => /^oxygen level$/i.test(h));
   const idxPR = header.findIndex((h) => /^pulse rate$/i.test(h));
+  const idxMotion = header.findIndex((h) => /^motion$/i.test(h));
   if (idxTime === -1 || idxSpO2 === -1 || idxPR === -1) return [];
 
   const out: Row[] = [];
@@ -129,19 +127,47 @@ function parseCsvToRows(csvText: string): Row[] {
     const cols = lines[i].split(",");
     if (cols.length <= Math.max(idxTime, idxSpO2, idxPR)) continue;
 
-    const timeStr = (cols[idxTime] ?? "").trim(); // "01:34:42 Oct 21 2025" or "21/10/2025 1:34"
+    const timeStr = (cols[idxTime] ?? "").trim();
     const spo2Str = (cols[idxSpO2] ?? "").trim();
     const prStr = (cols[idxPR] ?? "").trim();
+    const motionStr = idxMotion !== -1 ? (cols[idxMotion] ?? "").trim() : "";
 
-    // Strip everything except digits and dot
     const toNum = (s: string) => Number((s.match(/[\d.]+/) ?? [""])[0]);
 
     const t = parseNonISOTime(timeStr);
     const spo2 = toNum(spo2Str);
     const pr = toNum(prStr);
+    const motion = toNum(motionStr);
 
     if (t != null && !Number.isNaN(spo2) && !Number.isNaN(pr)) {
-      out.push({ t, spo2, pr });
+      out.push({ t, spo2, pr, motion: !Number.isNaN(motion) ? motion : undefined });
+    }
+  }
+  return out;
+}
+
+/**
+ * Parse Raw PPG CSV text (sample_index, raw_ppg_value) with downsampling support
+ */
+function parsePpgCsvToRows(csvText: string): PpgRow[] {
+  const lines = csvText.replace(/\r\n?/g, "\n").split("\n").filter(Boolean);
+  if (lines.length <= 1) return [];
+
+  const header = lines[0].split(",").map((h) => h.trim().toLowerCase());
+  const idxIndex = header.findIndex((h) => h.includes("index") || h === "sample_index");
+  const idxPpg = header.findIndex((h) => h.includes("ppg") || h.includes("raw"));
+
+  const out: PpgRow[] = [];
+  // Downsample if more than 20,000 samples to maintain smooth graph rendering
+  const step = Math.max(1, Math.floor(lines.length / 20000));
+
+  for (let i = 1; i < lines.length; i += step) {
+    const cols = lines[i].split(",");
+    const rawIdx = idxIndex !== -1 ? Number(cols[idxIndex]) : i - 1;
+    const rawPpg = idxPpg !== -1 ? Number(cols[idxPpg]) : Number(cols[1] ?? cols[0]);
+
+    if (!Number.isNaN(rawPpg)) {
+      out.push({ index: Number.isNaN(rawIdx) ? i - 1 : rawIdx, ppg: rawPpg });
     }
   }
   return out;
@@ -154,44 +180,243 @@ export default function DetailedReport() {
     require("../../../assets/fonts/Roboto-Regular.ttf"),
     12
   );
-  const { id } = useLocalSearchParams<{
-    id: string;
-  }>();
+  const { id } = useLocalSearchParams<{ id: string }>();
 
   const [rows, setRows] = useState<Row[] | null>(null);
+  const [ppgRows, setPpgRows] = useState<PpgRow[] | null>(null);
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(true);
-
   const [patientID, setPatientID] = useState<string>("");
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [selectedFormat, setSelectedFormat] = useState<"pdf" | "csv">("pdf");
 
-  /**
-   * Get patientID from AsyncStorage
-   */
+  const executeShare = async () => {
+    setShareModalVisible(false);
+    if (selectedFormat === "pdf") {
+      await handleExportPdf();
+    } else {
+      await handleExportCsv();
+    }
+  };
+
+  const isPpg = useMemo(() => id?.toLowerCase().includes("ppg") ?? false, [id]);
+
+  // Load saved notes for this report on mount
+  useEffect(() => {
+    if (!id) return;
+    AsyncStorage.getItem(`report_note_${id}`).then((stored) => {
+      if (stored) setNotes(stored);
+    }).catch(() => {});
+  }, [id]);
+
+  const handleNotesChange = (val: string) => {
+    setNotes(val);
+    if (id) {
+      AsyncStorage.setItem(`report_note_${id}`, val).catch(() => {});
+    }
+  };
+
+  const handleServerUpload = async () => {
+    if (!id || !patientID) {
+      Alert.alert(t("error"), "Missing report information.");
+      return;
+    }
+    try {
+      setLoading(true);
+      if (!baseURL) {
+        Alert.alert(t("error"), "Server base URL is not configured.");
+        return;
+      }
+      const o2dataDir = getO2dataDir(patientID);
+      const csvFile = new ExpoFile(o2dataDir, id);
+
+      // 1. Upload CSV file
+      if (csvFile.exists === true) {
+        await uploadCsv({
+          patientId: patientID,
+          item: { id, uri: csvFile.uri },
+          baseURL,
+        });
+      }
+
+      // 2. Generate and upload PDF report
+      const validRows = rows ?? [];
+      const avgSpo2 = validRows.length > 0 ? validRows.reduce((acc, r) => acc + r.spo2, 0) / validRows.length : undefined;
+      const minSpo2 = validRows.length > 0 ? Math.min(...validRows.map((r) => r.spo2)) : undefined;
+      const avgPr = validRows.length > 0 ? validRows.reduce((acc, r) => acc + r.pr, 0) / validRows.length : undefined;
+      const startTime = validRows.length > 0 ? new Date(validRows[0].t).toLocaleString() : undefined;
+      const endTime = validRows.length > 0 ? new Date(validRows[validRows.length - 1].t).toLocaleString() : undefined;
+
+      const durationMs = validRows.length > 1 ? validRows[validRows.length - 1].t - validRows[0].t : 0;
+      const durationSec = Math.floor(durationMs / 1000);
+      const hh = String(Math.floor(durationSec / 3600)).padStart(2, "0");
+      const mm = String(Math.floor((durationSec % 3600) / 60)).padStart(2, "0");
+      const ss = String(durationSec % 60).padStart(2, "0");
+      const durationStr = `${hh}:${mm}:${ss}`;
+
+      const pdfUri = await generateAndReturnPdfUri({
+        id,
+        patientId: patientID,
+        patientName,
+        patientAge,
+        patientSex,
+        startTime,
+        endTime,
+        duration: durationStr,
+        notes,
+        rows: validRows,
+      });
+
+      if (pdfUri) {
+        const pdfFileName = `Report_${id.replace(/\.csv$/i, "")}.pdf`;
+        await uploadCsv({
+          patientId: patientID,
+          item: { id: pdfFileName, uri: pdfUri },
+          baseURL,
+        });
+      }
+
+      if (Platform.OS === "android") {
+        ToastAndroid.show("CSV & PDF report uploaded to server successfully.", ToastAndroid.SHORT);
+      } else {
+        Alert.alert("Success", "CSV & PDF report uploaded to server successfully.");
+      }
+    } catch (e: any) {
+      console.error("Server upload error:", e);
+      const msg = e?.message?.includes("Network request failed") || e?.message?.includes("Network")
+        ? "Network request failed. Please check your connection or server URL."
+        : (e?.message ?? "Failed to upload report to server.");
+      Alert.alert("Upload Error", msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExportPdf = async () => {
+    if (!id || !patientID) {
+      Alert.alert(t("error"), "Missing report information.");
+      return;
+    }
+    try {
+      setLoading(true);
+
+      const validRows = rows ?? [];
+      const avgSpo2 = validRows.length > 0 ? validRows.reduce((acc, r) => acc + r.spo2, 0) / validRows.length : undefined;
+      const minSpo2 = validRows.length > 0 ? Math.min(...validRows.map((r) => r.spo2)) : undefined;
+      const avgPr = validRows.length > 0 ? validRows.reduce((acc, r) => acc + r.pr, 0) / validRows.length : undefined;
+      const startTime = validRows.length > 0 ? new Date(validRows[0].t).toLocaleString() : undefined;
+      const endTime = validRows.length > 0 ? new Date(validRows[validRows.length - 1].t).toLocaleString() : undefined;
+
+      const durationMs = validRows.length > 1 ? validRows[validRows.length - 1].t - validRows[0].t : 0;
+      const durationSec = Math.floor(durationMs / 1000);
+      const hh = String(Math.floor(durationSec / 3600)).padStart(2, "0");
+      const mm = String(Math.floor((durationSec % 3600) / 60)).padStart(2, "0");
+      const ss = String(durationSec % 60).padStart(2, "0");
+      const durationStr = `${hh}:${mm}:${ss}`;
+
+      const pdfUri = await generateAndReturnPdfUri({
+        id,
+        patientId: patientID,
+        patientName,
+        patientAge,
+        patientSex,
+        startTime,
+        endTime,
+        duration: durationStr,
+        notes,
+        rows: validRows,
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(pdfUri, {
+          mimeType: "application/pdf",
+          dialogTitle: `Sleep Easy O2Ring Report - ${id}`,
+          UTI: "com.adobe.pdf",
+        });
+      }
+    } catch (e: any) {
+      console.error("DetailedReport export error:", e);
+      if (e?.message?.includes("cancel") || e?.code === "ERR_SHARING_CANCELED") {
+        return;
+      }
+      Alert.alert(t("error"), e?.message ?? "Failed to export PDF.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExportCsv = async () => {
+    if (!id || !patientID) {
+      Alert.alert(t("error"), "Missing report information.");
+      return;
+    }
+    try {
+      setLoading(true);
+      const o2dataDir = getO2dataDir(patientID);
+      const csvFile = new ExpoFile(o2dataDir, id);
+      if (csvFile.exists === true) {
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(csvFile.uri, {
+            mimeType: "text/csv",
+            dialogTitle: `Sleep Easy CSV Report - ${id}`,
+            UTI: "public.comma-separated-values-text",
+          });
+        }
+      } else {
+        Alert.alert("Export Failed", "Raw CSV report file does not exist locally.");
+      }
+    } catch (e: any) {
+      console.error("DetailedReport CSV export error:", e);
+      if (e?.message?.includes("cancel") || e?.code === "ERR_SHARING_CANCELED") {
+        return;
+      }
+      Alert.alert(t("error"), e?.message ?? "Failed to export CSV.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const [patientName, setPatientName] = useState<string>("Patient");
+  const [patientAge, setPatientAge] = useState<string>("N/A");
+  const [patientSex, setPatientSex] = useState<string>("N/A");
+
   useEffect(() => {
     (async () => {
       try {
-        const id = await AsyncStorage.getItem("patientID");
-        if (id) setPatientID(id);
+        const storedId = await AsyncStorage.getItem("patientID");
+        if (storedId) setPatientID(storedId);
+
+        const patientDataStr = await AsyncStorage.getItem("patientData");
+        if (patientDataStr) {
+          const p = JSON.parse(patientDataStr);
+          const nameVal = p.name || p.patient_name || p.full_name;
+          if (nameVal) setPatientName(nameVal);
+
+          const dobVal = p.birthdate || p.dob;
+          if (p.age) {
+            setPatientAge(String(p.age));
+          } else if (dobVal) {
+            const dob = new Date(dobVal);
+            const diff = Date.now() - dob.getTime();
+            const ageDate = new Date(diff);
+            const calculatedAge = Math.abs(ageDate.getUTCFullYear() - 1970);
+            setPatientAge(`${calculatedAge} (${dobVal})`);
+          }
+
+          const sexVal = p.sex || p.gender;
+          if (sexVal) setPatientSex(sexVal);
+        }
       } catch (error) {
         console.warn("Error@DetailedReport.tsx/useEffect:", error);
       }
     })();
   }, []);
 
-  /**
-   * Load data from file
-   */
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
-      if (!id) {
-        console.warn("Error@DetailedReport.tsx/useEffect: Missing file id");
-        return;
-      }
-
-      // Wait for patientID to be available before attempting to read the file
-      if (!patientID) return;
+      if (!id || !patientID) return;
 
       setLoading(true);
 
@@ -199,12 +424,23 @@ export default function DetailedReport() {
         const o2dataDir = getO2dataDir(patientID);
         const file = new ExpoFile(o2dataDir, id);
         const text = await file.text();
-        const data = parseCsvToRows(text);
-        if (!cancelled) setRows(data);
+
+        if (!cancelled) {
+          if (isPpg) {
+            const data = parsePpgCsvToRows(text);
+            setPpgRows(data);
+          } else {
+            const data = parseCsvToRows(text);
+            setRows(data);
+          }
+        }
       } catch (error) {
         console.warn("Error@DetailedReport.tsx/useEffect:", error);
         Alert.alert(t("error"), t("failedToLoadData"));
-        if (!cancelled) setRows([]);
+        if (!cancelled) {
+          setRows([]);
+          setPpgRows([]);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -213,22 +449,13 @@ export default function DetailedReport() {
     return () => {
       cancelled = true;
     };
-  }, [id, patientID]);
+  }, [id, patientID, isPpg]);
 
-  /**
-   * Add or edit notes in the CSV file
-   */
-  useEffect(() => {
-    async () => {};
-  }, [notes]);
-
-  // Sort data by time ascending
   const data = useMemo(() => {
     if (!rows) return [];
     return [...rows].sort((a, b) => a.t - b.t);
   }, [rows]);
 
-  // Loading
   if (loading) {
     return (
       <SafeAreaView
@@ -243,8 +470,9 @@ export default function DetailedReport() {
     );
   }
 
-  // No data
-  if (!data.length) {
+  const hasNoData = isPpg ? !ppgRows || !ppgRows.length : !data.length;
+
+  if (hasNoData) {
     return (
       <SafeAreaView
         style={{
@@ -262,118 +490,233 @@ export default function DetailedReport() {
     <SafeAreaView
       style={{ flex: 1, backgroundColor: C.bg, padding: 16 }}
       edges={["left", "right"]}>
-      <Text style={[{ color: C.text, marginBottom: 10, ...F.sectionLabel }]}>
-        {new Date(rows[0]?.t).toLocaleString("en-GB", {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        })}
-        {" - "}
-        {new Date(rows[rows.length - 1]?.t).toLocaleString("en-GB", {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        })}
-      </Text>
+      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+        {!isPpg && data.length > 0 && (
+          <Text style={[{ color: C.text, marginBottom: 10, ...F.sectionLabel }]}>
+            {new Date(data[0]?.t).toLocaleString("en-GB", {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            })}
+            {" - "}
+            {new Date(data[data.length - 1]?.t).toLocaleString("en-GB", {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            })}
+          </Text>
+        )}
 
-      {/* SpO2 Chart*/}
-      <View style={styles.chartContainer}>
-        <Text
+        {isPpg ? (
+          /* --- RAW PPG WAVEFORM CHART --- */
+          <View style={styles.chartContainer}>
+            <Text
+              style={[
+                { color: C.text, ...F.title, fontSize: 20, marginBottom: 5 },
+              ]}>
+              Raw PPG Waveform
+            </Text>
+            <CartesianChart
+              data={ppgRows ?? []}
+              xKey="index"
+              yKeys={["ppg"]}
+              xAxis={{
+                font: roboto,
+                labelColor: C.text,
+                lineColor: C.text,
+                formatXLabel: (v) => `${Math.round(Number(v) / 50)}s`,
+                tickCount: 5,
+              }}
+              yAxis={[
+                {
+                  font: roboto,
+                  labelColor: C.text,
+                  lineColor: C.text,
+                },
+              ]}>
+              {({ points }) => <Line points={points.ppg} color="red" strokeWidth={1.5} />}
+            </CartesianChart>
+          </View>
+        ) : (
+          /* --- STANDARD SPO2 & PULSE RATE CHARTS --- */
+          <>
+            <View style={styles.chartContainer}>
+              <Text
+                style={[
+                  { color: C.text, ...F.title, fontSize: 20, marginBottom: 5 },
+                ]}>
+                {t("spo2")}
+              </Text>
+              <CartesianChart
+                data={data}
+                xKey="t"
+                yKeys={["spo2"]}
+                xAxis={{
+                  font: roboto,
+                  labelColor: C.text,
+                  lineColor: C.text,
+                  formatXLabel: (v) =>
+                    new Date(Number(v)).toLocaleTimeString("en-GB", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }),
+                  tickCount: 5,
+                }}
+                yAxis={[
+                  {
+                    font: roboto,
+                    labelColor: C.text,
+                    lineColor: C.text,
+                  },
+                ]}
+                domain={{ y: [75, 100] }}>
+                {({ points }) => <Line points={points.spo2} color="green" />}
+              </CartesianChart>
+            </View>
+
+            <View style={styles.chartContainer}>
+              <Text
+                style={[
+                  { color: C.text, ...F.title, fontSize: 20, marginBottom: 5 },
+                ]}>
+                {t("pulseRate")}
+              </Text>
+              <CartesianChart
+                data={data}
+                xKey="t"
+                yKeys={["pr"]}
+                xAxis={{
+                  font: roboto,
+                  labelColor: C.text,
+                  lineColor: C.text,
+                  formatXLabel: (v) =>
+                    new Date(Number(v)).toLocaleTimeString("en-GB", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }),
+                  tickCount: 5,
+                }}
+                yAxis={[
+                  {
+                    font: roboto,
+                    labelColor: C.text,
+                    lineColor: C.text,
+                  },
+                ]}
+                domain={{ y: [30, 120] }}>
+                {({ points }) => <Line points={points.pr} color={"green"} />}
+              </CartesianChart>
+            </View>
+          </>
+        )}
+
+        {/* Notes */}
+        <View style={styles.notesTitleContainer}>
+          <Text style={[{ color: C.sub, ...F.sectionLabel }]}>{t("notes")}</Text>
+        </View>
+        <View
           style={[
-            { color: C.text, ...F.title, fontSize: 20, marginBottom: 5 },
-          ]}>
-          {t("spo2")}
-        </Text>
-        <CartesianChart
-          data={data}
-          xKey="t"
-          yKeys={["spo2"]}
-          xAxis={{
-            font: roboto,
-            labelColor: C.text,
-            lineColor: C.text,
-            formatXLabel: (v) =>
-              new Date(Number(v)).toLocaleTimeString("en-GB", {
-                hour: "2-digit",
-                minute: "2-digit",
-              }),
-            tickCount: 5,
-          }}
-          yAxis={[
+            styles.notesRow,
             {
-              font: roboto,
-              labelColor: C.text,
-              lineColor: C.text,
+              borderColor: C.border,
+              backgroundColor: C.bg,
             },
-          ]}
-          domain={{ y: [75, 100] }}>
-          {({ points }) => <Line points={points.spo2} color="green" />}
-        </CartesianChart>
-      </View>
-
-      {/* Pulse Rate Chart*/}
-      <View style={styles.chartContainer}>
-        <Text
-          style={[
-            { color: C.text, ...F.title, fontSize: 20, marginBottom: 5 },
           ]}>
-          {t("pulseRate")}
-        </Text>
-        <CartesianChart
-          data={data}
-          xKey="t"
-          yKeys={["pr"]}
-          xAxis={{
-            font: roboto,
-            labelColor: C.text,
-            lineColor: C.text,
-            formatXLabel: (v) =>
-              new Date(Number(v)).toLocaleTimeString("en-GB", {
-                hour: "2-digit",
-                minute: "2-digit",
-              }),
-            tickCount: 5,
-          }}
-          yAxis={[
-            {
-              font: roboto,
-              labelColor: C.text,
-              lineColor: C.text,
-            },
-          ]}
-          domain={{ y: [30, 120] }}>
-          {({ points }) => <Line points={points.pr} color={"green"} />}
-        </CartesianChart>
-      </View>
+          <TextInput
+            value={notes}
+            onChangeText={handleNotesChange}
+            placeholder={t("notes")}
+            placeholderTextColor={C.sub}
+            autoCapitalize="none"
+            underlineColorAndroid={"transparent"}
+            style={{ color: C.text }}
+          />
+        </View>
 
-      {/* Notes */}
-      <View style={styles.notesTitleContainer}>
-        <Text style={[{ color: C.sub, ...F.sectionLabel }]}>{t("notes")}</Text>
-      </View>
-      <View
-        style={[
-          styles.notesRow,
-          {
-            borderColor: C.border,
-            backgroundColor: C.bg,
-          },
-        ]}>
-        <TextInput
-          value={notes}
-          onChangeText={setNotes}
-          placeholder={t("notes")}
-          placeholderTextColor={C.sub}
-          autoCapitalize="none"
-          underlineColorAndroid={"transparent"}
-          style={{ color: C.text }}
-        />
-      </View>
+        <Pressable
+          style={[styles.actionButton, { backgroundColor: C.tint, width: "100%", marginBottom: 8 }]}
+          onPress={handleServerUpload}
+          activeOpacity={0.85}>
+          <Text style={[F.buttonText, { color: C.white, fontSize: 13 }]}>Upload to Server</Text>
+        </Pressable>
+
+        <Pressable
+          style={[styles.actionButton, { backgroundColor: C.tint, width: "100%" }]}
+          onPress={() => setShareModalVisible(true)}
+          activeOpacity={0.85}>
+          <Text style={[F.buttonText, { color: C.white, fontSize: 13 }]}>Export & Share</Text>
+        </Pressable>
+
+        <Modal
+          visible={shareModalVisible}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShareModalVisible(false)}>
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
+            <View style={{ backgroundColor: C.bg2, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 36 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <Text style={{ fontSize: 18, fontWeight: "800", color: C.text }}>Share Blood Oxygen records</Text>
+                <TouchableOpacity onPress={() => setShareModalVisible(false)}>
+                  <Ionicons name="close-circle" size={24} color={C.sub} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>Select format:</Text>
+
+              <View style={{ flexDirection: "row", gap: 12, marginBottom: 20 }}>
+                <Pressable
+                  onPress={() => setSelectedFormat("pdf")}
+                  style={{
+                    flex: 1,
+                    backgroundColor: C.card,
+                    borderWidth: selectedFormat === "pdf" ? 2 : StyleSheet.hairlineWidth,
+                    borderColor: selectedFormat === "pdf" ? C.tint : C.border,
+                    borderRadius: 14,
+                    padding: 16,
+                    alignItems: "center",
+                  }}>
+                  <MaterialCommunityIcons name="file-pdf-box" size={36} color="#E74C3C" style={{ marginBottom: 8 }} />
+                  <Text style={{ fontSize: 14, fontWeight: "700", color: C.text, marginBottom: 8 }}>PDF</Text>
+                  <View style={{ width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: selectedFormat === "pdf" ? C.tint : C.sub, alignItems: "center", justifyContent: "center" }}>
+                    {selectedFormat === "pdf" && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: C.tint }} />}
+                  </View>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => setSelectedFormat("csv")}
+                  style={{
+                    flex: 1,
+                    backgroundColor: C.card,
+                    borderWidth: selectedFormat === "csv" ? 2 : StyleSheet.hairlineWidth,
+                    borderColor: selectedFormat === "csv" ? C.tint : C.border,
+                    borderRadius: 14,
+                    padding: 16,
+                    alignItems: "center",
+                  }}>
+                  <MaterialCommunityIcons name="file-delimited" size={36} color="#27AE60" style={{ marginBottom: 8 }} />
+                  <Text style={{ fontSize: 14, fontWeight: "700", color: C.text, marginBottom: 8 }}>CSV</Text>
+                  <View style={{ width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: selectedFormat === "csv" ? C.tint : C.sub, alignItems: "center", justifyContent: "center" }}>
+                    {selectedFormat === "csv" && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: C.tint }} />}
+                  </View>
+                </Pressable>
+              </View>
+
+              <Pressable
+                style={[styles.actionButton, { backgroundColor: C.tint, width: "100%" }]}
+                onPress={executeShare}
+                activeOpacity={0.85}>
+                <Text style={[F.buttonText, { color: C.white, fontSize: 15 }]}>Share</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -381,10 +724,10 @@ export default function DetailedReport() {
 const styles = StyleSheet.create({
   chartContainer: {
     width: "100%",
-    height: height * 0.3,
-    paddingBottom: 3,
+    height: height * 0.22,
+    paddingBottom: 10,
   },
-  notesTitleContainer: { paddingHorizontal: 5, marginTop: 4, marginBottom: 8 },
+  notesTitleContainer: { paddingHorizontal: 5, marginTop: 12, marginBottom: 8 },
 
   notesRow: {
     minHeight: 56,
@@ -393,5 +736,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 12,
+  },
+  buttonRow: {
+    flexDirection: "row",
+    marginTop: 16,
+    width: "100%",
+  },
+  actionButton: {
+    height: 44,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

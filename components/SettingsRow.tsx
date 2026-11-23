@@ -7,6 +7,7 @@ import {
   Switch,
   TextInput,
   TextInputProps,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../theme/ThemeProvider";
@@ -94,25 +95,28 @@ function SettingsRow({
             style={{
               color: textValue ? C.text : C.sub,
               ...F.text,
+              fontSize: 12,
               fontWeight: "700",
             }}>
             {textValue || "Select date"}
           </Text>
         ) : (
           <>
-            <Text style={{ color: C.text, ...F.text }}>{title}</Text>
+            <Text style={{ color: C.text, ...F.text, fontSize: 12 }}>{title}</Text>
           </>
         )}
       </View>
 
       {/* Right accessory */}
       {isSwitch ? (
-        <Switch
-          value={!!switchValue}
-          onValueChange={(next) => onToggleSwitch?.(next)}
-          trackColor={{ false: C.sub, true: C.sub }}
-          thumbColor={switchValue ? C.tint : C.tint}
-        />
+        <View style={{ transform: Platform.OS === "ios" ? [{ scale: 0.85 }] : undefined, justifyContent: "center", alignItems: "flex-end" }}>
+          <Switch
+            value={!!switchValue}
+            onValueChange={(next) => onToggleSwitch?.(next)}
+            trackColor={{ false: C.sub, true: C.tint }}
+            thumbColor={C.white}
+          />
+        </View>
       ) : type === "link" ? (
         <Ionicons
           name="chevron-forward"
@@ -132,12 +136,12 @@ function SettingsRow({
   );
 }
 
-export default React.memo(SettingsRow);
+export default SettingsRow;
 
 const styles = StyleSheet.create({
   row: {
-    minHeight: 57,
-    paddingHorizontal: 14,
+    minHeight: 46,
+    paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
   },

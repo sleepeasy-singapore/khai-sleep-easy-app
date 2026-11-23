@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState, useEffect } from "react";
 import { Alert, Linking } from "react-native";
 import Constants from "expo-constants";
 import { useRouter } from "expo-router";
@@ -8,6 +8,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import SettingsList from "../../../components/SettingsList";
 import { useTheme } from "../../../theme/ThemeProvider";
 import { useO2Ring } from "../../../service/O2RingProvider";
+import { isDistributorApp } from "../../../service/AppVariant";
 import type { Card } from "../../../types/settings";
 
 export default function SettingsScreen() {
@@ -16,7 +17,7 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { disconnect } = useO2Ring();
 
-  const appVersion = Constants.expoConfig.version;
+  const appVersion = Constants.expoConfig?.version ?? "1.3.3";
 
   const [switches, setSwitches] = useState<Record<string, boolean>>({
     dark: isDark,
@@ -92,7 +93,7 @@ export default function SettingsScreen() {
             type: "link",
             title: t("notification"),
             icon: "notifications-outline",
-            route: "/(tabs)/settings/Notification",
+            route: "./Notification",
           },
           */
           {
@@ -102,6 +103,27 @@ export default function SettingsScreen() {
             icon: "language-outline",
             route: "/(tabs)/settings/Language",
           },
+          {
+            id: "ppgHzRoute",
+            type: "link",
+            title: "PPG Sampling Rate",
+            icon: "pulse-outline",
+            route: "/(tabs)/settings/PpgHz",
+          },
+          {
+            id: "chartVisibility",
+            type: "link",
+            title: "Customize Dashboard Charts",
+            icon: "options-outline",
+            route: "/(tabs)/settings/ChartVisibility",
+          },
+          ...(isDistributorApp ? [{
+            id: "bpCalibration",
+            type: "link",
+            title: "Blood Pressure Calibration",
+            icon: "fitness-outline",
+            route: "/BpCalibration?from=settings",
+          }] : []),
         ],
       },
       /*

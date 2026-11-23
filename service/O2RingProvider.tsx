@@ -3,16 +3,29 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useMemo,
   useState,
 } from "react";
-import { File as ExpoFile } from "expo-file-system";
+import { useO2RingBpStream } from "viatom-o2ring";
+import { Directory, File as ExpoFile } from "expo-file-system";
 import * as O2Ring from "@ios-app/viatom-o2ring";
-import { ensureDir } from "./History";
+import { ensureDir, uploadPendingCsvs, uploadCsv, UploadItem } from "./History";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Platform } from "react-native";
+import { Platform, NativeModules, PermissionsAndroid } from "react-native";
 import { API_DEV, API_PROD } from "@env";
-import { uploadPendingCsvs, UploadItem } from "./History";
+import { uploadRawPpgPayload, authHeader } from "../api/api";
+import { requireOptionalNativeModule } from "expo-modules-core";
+import { useReadingSeries, SeriesPoint } from "../components/live/useReadingSeries";
+import { calculateRespiratoryRate } from "./HaemodynamicCalculations";
+
+const isNativeModuleAvailable = (): boolean => {
+  try {
+    return !!requireOptionalNativeModule("Viatom");
+  } catch {
+    return false;
+  }
+};
 
 const REALTIME_STALE_TIMEOUT_MS = 5000;
 const READ_TIMEOUT_MS = 30000;
@@ -20,7 +33,6 @@ const MAX_READ_RETRIES = 2;
 const HISTORY_DEVICE_KEY = "historyConnectedDevice";
 const LEGACY_HISTORY_DEVICE_KEY = "historyConnectedDeviceMac";
 const MAX_KNOWN_DEVICES = 5;
-
 type DeviceItem = O2Ring.DeviceFoundEvent;
 
 type Subscription = { remove: () => void };
@@ -40,11 +52,23 @@ type O2RingContextValue = {
   knownDevices: DeviceItem[];
   spo2: number | null;
   pr: number | null;
+  rr: number | null;
+  sbp: number | null;
+  dbp: number | null;
+  pi: number | null;
+  motion: number | null;
   realtimeUpdatedAt: number | null;
   isDownloadingHistory: boolean;
+  historyLastSavedAt: number | null;
   downloadProgress: number;
   downloadTotalFiles: number;
   downloadCompletedFiles: number;
+  spo2Series: SeriesPoint[];
+  prSeries: SeriesPoint[];
+  sbpSeries: SeriesPoint[];
+  dbpSeries: SeriesPoint[];
+  motionSeries: SeriesPoint[];
+  rrSeries: SeriesPoint[];
   requestPermissions: () => Promise<boolean>;
   startScan: () => Promise<boolean>;
   stopScan: () => Promise<void>;
@@ -52,6 +76,9 @@ type O2RingContextValue = {
   forgetDevice: (device: DeviceItem) => void;
   tempForgetDevice: (device: DeviceItem) => void;
   disconnect: () => Promise<void>;
+  disconnectCountdown: number | null;
+  cancelDisconnect: () => void;
+  executeActualDisconnect: () => Promise<void>;
   clearOfflineDevice: () => void;
   clearDevices: () => void;
   refreshRealtime: () => Promise<boolean>;
@@ -59,6 +86,21 @@ type O2RingContextValue = {
 };
 
 const O2RingContext = createContext<O2RingContextValue | null>(null);
+
+export function resolveDeviceModel(name?: string, rawModel?: number): number {
+  if (rawModel != null && rawModel !== 0) return rawModel;
+  const n = (name || "").toLowerCase().replace(/[\s_-]/g, "");
+  if (n.includes("kidso2") || n.includes("o2ring") || n.includes("wearo2")) {
+    return 4; // O2Ring / KidsO2 model ID
+  }
+  if (n.includes("checkme") || n.includes("bp2") || n.includes("ecg")) {
+    return 2; // Checkme / BP2 model ID
+  }
+  if (n.includes("o2w") || n.includes("o2watch") || n.includes("o2m")) {
+    return 1; // O2Watch / O2M model ID
+  }
+  return rawModel ?? 4;
+}
 
 export function O2RingProvider({ children }: { children: React.ReactNode }) {
   const [initializing, setInitializing] = useState(true);
@@ -71,6 +113,9 @@ export function O2RingProvider({ children }: { children: React.ReactNode }) {
   );
   const [offlineDevice, setOfflineDevice] = useState<DeviceItem | null>(null);
   const [knownDevices, setKnownDevices] = useState<DeviceItem[]>([]);
+  const [lastConnectedMac, setLastConnectedMac] = useState<string | null>(null);
+  const [disconnectCountdown, setDisconnectCountdown] = useState<number | null>(null);
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [serviceReady, setServiceReady] = useState(
     Platform.OS === "android" ? true : false
   );
@@ -81,17 +126,97 @@ export function O2RingProvider({ children }: { children: React.ReactNode }) {
   const [batteryState, setBatteryState] = useState<number | null>(null);
   const [spo2, setSpo2] = useState<number | null>(null);
   const [pr, setPr] = useState<number | null>(null);
+  const [rr, setRr] = useState<number | null>(null);
+  const [sbp, setSbp] = useState<number | null>(null);
+  const [dbp, setDbp] = useState<number | null>(null);
+  const [isBpStabilizing, setIsBpStabilizing] = useState(false);
+  const stabilizationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const triggerBpStabilization = useCallback(() => {
+    setIsBpStabilizing(true);
+    if (stabilizationTimerRef.current) clearTimeout(stabilizationTimerRef.current);
+    stabilizationTimerRef.current = setTimeout(() => {
+      setIsBpStabilizing(false);
+    }, 3500);
+  }, []);
+
+  const [pi, setPi] = useState<number | null>(null);
+  const [motion, setMotion] = useState<number | null>(null);
   const [realtimeUpdatedAt, setRealtimeUpdatedAt] = useState<number | null>(
     null
   );
   const [isDownloadingHistory, setIsDownloadingHistory] = useState(false);
+  const [historyLastSavedAt, setHistoryLastSavedAt] = useState<number | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadCounts, setDownloadCounts] = useState({
     total: 0,
     completed: 0,
   });
   const [patientId, setPatientId] = useState<string | null>(null);
-  const infoRetryTimer = React.useRef<NodeJS.Timeout | null>(null);
+  const [calibrationTimes, setCalibrationTimes] = useState<number[]>([]);
+  const [calibrationCount, setCalibrationCount] = useState<number>(0);
+  const ppgHzRef = React.useRef(125);
+  const calibrationSentRef = React.useRef(false);
+
+  useEffect(() => {
+    if (!connectedDevice) {
+      calibrationSentRef.current = false;
+    }
+  }, [connectedDevice]);
+
+  const addCalibrationTimestamp = useCallback((time: number) => {
+    setCalibrationTimes((prev) => {
+      const next = [...prev, time];
+      setCalibrationCount(next.length);
+      return next;
+    });
+  }, []);
+
+  const resetSessionCalibration = useCallback(() => {
+    setCalibrationTimes([]);
+    setCalibrationCount(0);
+    AsyncStorage.getItem("settings:bp_calibration").then((stored) => {
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          const resetPayload = {
+            sbp: parsed.sbp,
+            dbp: parsed.dbp,
+            calibrationTime: null,
+            calibrationTimes: [],
+            calibrationCount: 0,
+          };
+          AsyncStorage.setItem("settings:bp_calibration", JSON.stringify(resetPayload)).catch(() => {});
+        } catch {}
+      }
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.getItem("settings:bp_calibration").then((stored) => {
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed.calibrationTimes)) {
+            setCalibrationTimes(parsed.calibrationTimes);
+            setCalibrationCount(parsed.calibrationTimes.length);
+          }
+        } catch {}
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.getItem("ppg_sampling_hz").then((val) => {
+      if (val) {
+        const parsedHz = parseInt(val, 10);
+        if (!isNaN(parsedHz) && parsedHz > 0) {
+          ppgHzRef.current = parsedHz;
+        }
+      }
+    });
+  }, []);
+  const infoRetryTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const patientIdRef = React.useRef<string | null>(null);
   const connectedDeviceRef = React.useRef<DeviceItem | null>(null);
   const serviceReadyRef = React.useRef(serviceReady);
@@ -100,19 +225,39 @@ export function O2RingProvider({ children }: { children: React.ReactNode }) {
   const syncingPatientId = React.useRef<Promise<string | null> | null>(null);
   const readQueue = React.useRef<string[]>([]);
   const currentReading = React.useRef<string | null>(null);
-  const readTimeout = React.useRef<NodeJS.Timeout | null>(null);
+  const readTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const readAttempts = React.useRef<Map<string, number>>(new Map());
   const realtimeStartPromise = React.useRef<Promise<boolean> | null>(null);
   const knownDevicesRef = React.useRef<DeviceItem[]>([]);
   const autoReconnectAttempted = React.useRef(false);
-  const autoReconnectScanTimeout = React.useRef<NodeJS.Timeout | null>(null);
+  const autoReconnectScanTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectingRef = React.useRef(false);
   const autoConnectingRef = React.useRef(false);
+  const offFingerCountRef = React.useRef(0);
+  const connectionTimeRef = React.useRef(0);
+  const isAutoDisconnectActiveRef = React.useRef(false);
+  const offFingerTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isManualConnectingRef = React.useRef(false);
+  const lastDisconnectLogTime = React.useRef(0);
   const autoReconnectEnabled = React.useRef(true);
   const isDownloadingHistoryRef = React.useRef(false);
+  const isScanningRef = React.useRef(false);
   const totalFilesToDownload = React.useRef(0);
   const downloadedFiles = React.useRef(0);
-  const rawBase = __DEV__ ? API_DEV : API_PROD;
+  const nativeUploadRef = useRef(false);
+  const bpBuffer = React.useRef<{ sbp: number; dbp: number }[]>([]);
+  const spo2Ref = React.useRef<number | null>(null);
+  const prRef = React.useRef<number | null>(null);
+  const prBuffer = React.useRef<number[]>([]);
+
+  useEffect(() => {
+    spo2Ref.current = spo2;
+  }, [spo2]);
+
+  useEffect(() => {
+    prRef.current = pr;
+  }, [pr]);
+  const rawBase = API_DEV || API_PROD;
   const baseURL = rawBase?.replace(/\/+$/, "");
 
   // -------------------
@@ -138,6 +283,17 @@ export function O2RingProvider({ children }: { children: React.ReactNode }) {
       });
 
     return syncingPatientId.current;
+
+  }, []);
+
+
+
+  useEffect(() => {
+    if (!isNativeModuleAvailable()) {
+      console.warn(
+        "[O2RingProvider] Viatom native module is not available in this build! BLE sync and PPG data acquisition will be disabled until the next native build."
+      );
+    }
   }, []);
 
   // Load patient ID from AsyncStorage (same key used elsewhere)
@@ -165,11 +321,33 @@ const processReadQueue = useCallback(() => {
     // No more files to read → cleanup and exit.
     if (!next) {
       setIsDownloadingHistory(false);
+      isDownloadingHistoryRef.current = false;
       setDownloadProgress(0);
       totalFilesToDownload.current = 0;
       downloadedFiles.current = 0;
       setDownloadCounts({ total: 0, completed: 0 });
       readAttempts.current.clear();
+
+      // If auto-disconnect countdown was waiting for history sync/upload, finish now!
+      if (countdownTimerRef.current != null) {
+        clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+        setDisconnectCountdown(null);
+        executeActualDisconnect();
+        return;
+      }
+
+      // Force resume real-time telemetry & live wave after history sync completes (wait 3s for ring to fully exit file mode)
+      setTimeout(async () => {
+        try {
+          await startRealtimeStream();
+          await O2Ring.setLiveWave(true);
+          console.log("[O2Ring] Resumed real-time stream & live wave after history sync");
+        } catch (e) {
+          console.warn("Error resuming realtime after history sync:", e);
+        }
+      }, 3000);
+
       return;
     }
 
@@ -241,6 +419,7 @@ const processReadQueue = useCallback(() => {
    */
   const enqueueHistoryFiles = useCallback(
     (files: string[]) => {
+      if (!files || files.length === 0) return;
       const newOnes = files.filter(
         (f) => !readQueue.current.includes(f) && currentReading.current !== f
       );
@@ -275,6 +454,8 @@ const processReadQueue = useCallback(() => {
   // -------------------
   // MARK: O2Ring Connection & Realtime
   // -------------------
+
+
   useEffect(() => {
     connectedDeviceRef.current = connectedDevice;
   }, [connectedDevice]);
@@ -347,7 +528,65 @@ const processReadQueue = useCallback(() => {
       return filtered;
     });
   }, []);
+/**
+   * Start realtime streaming with retries. BLE can easily stall when the system is busy,
+   * so we ensure that only one attempt is active and back off between retries.
+   */
+  const startRealtimeStream = useCallback(async () => {
+    if (realtimeStartPromise.current) {
+      return realtimeStartPromise.current;
+    }
 
+    // Must have a device
+    if (!connectedDeviceRef.current && connectedDevice) {
+      connectedDeviceRef.current = connectedDevice;
+    }
+    if (!connectedDeviceRef.current) {
+      console.warn("startRealtime: no connected device yet");
+      return Promise.resolve(false);
+    }
+
+    // If history files are currently downloading, hold off on starting realtime
+    if (isDownloadingHistoryRef.current || readQueue.current.length > 0 || currentReading.current != null) {
+      console.log("[O2Ring] History sync in progress; deferring startRealtime until sync completes");
+      return Promise.resolve(false);
+    }
+
+    // On iOS, must wait for serviceReady
+    if (Platform.OS === "ios" && !serviceReadyRef.current) {
+      console.warn("startRealtime: service not ready yet");
+      return Promise.resolve(false);
+    }
+
+    if (Platform.OS === "ios") {
+      setIosRealtimeReady(false);
+    }
+
+    const attempt = async (count: number): Promise<boolean> => {
+      try {
+        await O2Ring.startRealtime();
+        triggerBpStabilization();
+        return true;
+      } catch (e) {
+        if (count >= 10) {
+          console.warn(
+            `Error@O2RingProvider.tsx/startRealtime failed after 10 attempts:`,
+            e
+          );
+          return false;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000 * count));
+        return attempt(count + 1);
+      }
+    };
+
+    const promise = attempt(1).finally(() => {
+      realtimeStartPromise.current = null;
+    });
+
+    realtimeStartPromise.current = promise;
+    return promise;
+  }, []);
   // Once connected, keep polling getInfo until native responds so history download always kicks in.
   useEffect(() => {
     if (!connectedDevice || !serviceReady) return;
@@ -396,6 +635,8 @@ const processReadQueue = useCallback(() => {
     };
   }, [connectedDevice, serviceReady, startRealtimeStream, syncPatientId]);
 
+  // Periodically refresh ring battery status every 60 seconds while connected (removed to prevent native re-triggers)
+
   const requestPermissions = useCallback(async () => {
     try {
       const granted = await O2Ring.requestPermissions();
@@ -408,81 +649,41 @@ const processReadQueue = useCallback(() => {
     }
   }, []);
 
-  /**
-   * Start realtime streaming with retries. BLE can easily stall when the system is busy,
-   * so we ensure that only one attempt is active and back off between retries.
-   */
-  const startRealtimeStream = useCallback(async () => {
-    if (realtimeStartPromise.current) {
-      return realtimeStartPromise.current;
-    }
 
-    // Must have a device
-    if (!connectedDeviceRef.current) {
-      console.warn("startRealtime: no connected device yet");
-      return Promise.resolve(false);
-    }
-
-    // On iOS, must wait for serviceReady
-    if (Platform.OS === "ios" && !serviceReadyRef.current) {
-      console.warn("startRealtime: service not ready yet");
-      return Promise.resolve(false);
-    }
-
-    if (Platform.OS === "ios") {
-      setIosRealtimeReady(false);
-    }
-
-    const attempt = async (count: number): Promise<boolean> => {
-      try {
-        await O2Ring.startRealtime();
-        return true;
-      } catch (e) {
-        console.warn(
-          `Error@O2RingProvider.tsx/startRealtime attempt ${count}: `,
-          e
-        );
-        if (count >= 10) return false;
-        await new Promise((resolve) => setTimeout(resolve, 500 * count));
-        return attempt(count + 1);
-      }
-    };
-
-    const promise = attempt(1).finally(() => {
-      realtimeStartPromise.current = null;
-    });
-
-    realtimeStartPromise.current = promise;
-    return promise;
-  }, []);
 
   useEffect(() => {
-    if (Platform.OS !== "ios") return;
-
     const sub = O2Ring.addServiceReadyListener(() => {
       serviceReadyRef.current = true;
       setServiceReady(true);
       startRealtimeStream();
-      syncPatientId()
-        .catch(() => null)
-        .finally(() => {
-          O2Ring.getInfo().catch((err) =>
-            console.warn(
-              "Error@O2RingProvider.tsx/getInfo (service ready): ",
-              err
-            )
-          );
-        });
+
+      syncPatientId().catch(() => null);
+
+      // Delay history sync by 5 seconds so real-time streaming gets priority on connection
+      setTimeout(() => {
+        O2Ring.getInfo().catch((err) =>
+          console.warn(
+            "Error@O2RingProvider.tsx/getInfo (service ready): ",
+            err
+          )
+        );
+      }, 5000);
     });
 
     return () => sub.remove();
   }, [startRealtimeStream, syncPatientId]);
 
+  // If SpO2 or PR is invalid/null (ring removed), instantly clear BP as well
   useEffect(() => {
-    if (Platform.OS === "ios") {
-      if (connectedDevice && serviceReady) {
-        startRealtimeStream();
-      }
+    if (spo2 == null || spo2 < 20 || pr == null || pr < 20) {
+      setSbp(null);
+      setDbp(null);
+    }
+  }, [spo2, pr]);
+
+  useEffect(() => {
+    if (connectedDevice && serviceReady) {
+      startRealtimeStream();
     }
   }, [connectedDevice, serviceReady, startRealtimeStream]);
 
@@ -530,17 +731,47 @@ const processReadQueue = useCallback(() => {
     };
   }, []);
 
+  const ppgBufferRef = useRef<{ ir: number[]; red: number[]; motion: number[] }>({
+    ir: [],
+    red: [],
+    motion: []
+  });
+
   // Initialize native module + listeners once.
   // Everything inside the setup callback deals with native events so we centralize
   // cleanup logic here as well.
   useEffect(() => {
+    const subConn = O2Ring.addConnectedListener(async (e: any) => {
+      console.log("[O2Ring] onConnected event received:", e);
+      const mac = e?.mac || e?.device?.mac;
+      const model = e?.model ?? e?.device?.model ?? 4;
+      if (mac && !connectedDeviceRef.current) {
+        const recoveredDevice = {
+          mac,
+          name: e?.name || e?.device?.name || "O2Ring 0401",
+          model
+        };
+        connectedDeviceRef.current = recoveredDevice;
+        setConnectedDevice(recoveredDevice);
+      }
+      serviceReadyRef.current = true;
+      setServiceReady(true);
+      await startRealtimeStream();
+      try {
+        await O2Ring.setLiveWave(true);
+      } catch {}
+    });
+
     let subRt: Subscription | null = null;
+    let subRtPpg: Subscription | null = null;
+    let subPpgFile: Subscription | null = null;
     let subErr: Subscription | null = null;
     let subDev: Subscription | null = null;
     let subDisc: Subscription | null = null;
     let subInfo: Subscription | null = null;
     let subProgress: Subscription | null = null;
     let subFile: Subscription | null = null;
+    let subWave: Subscription | null = null;
 
     const setup = async () => {
       try {
@@ -555,11 +786,166 @@ const processReadQueue = useCallback(() => {
       }
 
       subRt = O2Ring.addRealtimeListener((rt) => {
-        setSpo2(rt.spo2);
-        setPr(rt.pr);
+        let validPr = rt.pr;
+        if (validPr != null && (validPr < 30 || validPr > 250)) validPr = null;
+        if (validPr != null) {
+          prBuffer.current.push(validPr);
+          if (prBuffer.current.length > 5) prBuffer.current.shift();
+        }
+
+        let validSpo2 = rt.spo2;
+        if (validSpo2 != null && (validSpo2 < 50 || validSpo2 > 100)) validSpo2 = null;
+
+        const connectedDuration = connectionTimeRef.current ? Date.now() - connectionTimeRef.current : 0;
+        const isArmed = serviceReadyRef.current && connectedDuration > 6000;
+
+        if (isArmed && (validSpo2 == null || validSpo2 <= 0 || validPr == null || validPr <= 0)) {
+          offFingerCountRef.current++;
+          if (offFingerCountRef.current >= 3 && connectedDeviceRef.current && !isAutoDisconnectActiveRef.current && !connectingRef.current) {
+            if (!offFingerTimerRef.current) {
+              console.log("[O2Ring] Finger removal detected. Waiting 3s before starting sync countdown...");
+              offFingerTimerRef.current = setTimeout(() => {
+                offFingerTimerRef.current = null;
+                if (connectedDeviceRef.current && !isAutoDisconnectActiveRef.current) {
+                  isAutoDisconnectActiveRef.current = true;
+                  startAutoDisconnectCountdown();
+                }
+              }, 3000);
+            }
+          }
+        } else {
+          offFingerCountRef.current = 0;
+          if (offFingerTimerRef.current) {
+            clearTimeout(offFingerTimerRef.current);
+            offFingerTimerRef.current = null;
+          }
+        }
+
+        setSpo2(validSpo2);
+        setPr(validPr);
+        setRr(rt.rr ?? null);
+        setPi(rt.pi ?? null);
+        setMotion(rt.motion ?? null);
         setRealtimeUpdatedAt(Date.now());
         if (Platform.OS === "ios") {
           setIosRealtimeReady((prev) => (prev ? prev : true));
+        }
+      });
+
+      subRtPpg = O2Ring.addRtPpgListener((ppg: any) => {
+        const rawSamples = ppg?.samples ?? ppg?.ir;
+        if (rawSamples && Array.isArray(rawSamples) && rawSamples.length > 0) {
+          ppgBufferRef.current.ir.push(...rawSamples);
+          if (ppg?.motion) {
+            ppgBufferRef.current.motion.push(...ppg.motion);
+          }
+          if (ppgBufferRef.current.ir.length > 1250) {
+            ppgBufferRef.current.ir = ppgBufferRef.current.ir.slice(-1250);
+          }
+          const calculatedRr = calculateRespiratoryRate(
+            prBuffer.current,
+            ppgBufferRef.current.ir,
+            ppgHzRef.current
+          );
+          setRr(calculatedRr);
+
+          if (ppgBufferRef.current.ir.length % 150 === 0) {
+            console.log(`[PPG Stream Active] Captured ${ppgBufferRef.current.ir.length} raw PPG samples`);
+          }
+        }
+      });
+
+      subWave = O2Ring.addBloodPressureListener((bp) => {
+        if (bp?.stabilizing === true) {
+          setIsBpStabilizing(true);
+          if (stabilizationTimerRef.current) clearTimeout(stabilizationTimerRef.current);
+          stabilizationTimerRef.current = setTimeout(() => {
+            setIsBpStabilizing(false);
+          }, 3500);
+          bpBuffer.current = [];
+          setSbp(null);
+          setDbp(null);
+          return;
+        }
+
+        setIsBpStabilizing(false);
+
+        if (spo2Ref.current == null || spo2Ref.current < 20 || prRef.current == null || prRef.current < 20) {
+          bpBuffer.current = [];
+          setSbp(null);
+          setDbp(null);
+          return;
+        }
+
+        if (bp?.sbp != null && bp?.dbp != null && bp.sbp > 30 && bp.dbp > 30 && !isNaN(bp.sbp) && !isNaN(bp.dbp)) {
+          setIsBpStabilizing(false);
+          const high = Math.max(bp.sbp, bp.dbp);
+          const low = Math.min(bp.sbp, bp.dbp);
+          let rawSbp = high;
+          let rawDbp = low;
+          if (rawSbp - rawDbp < 25.0) {
+            rawSbp = rawDbp + 25.0;
+          }
+
+          const buf = bpBuffer.current;
+          buf.push({ sbp: rawSbp, dbp: rawDbp });
+          if (buf.length > 5) buf.shift();
+
+          const sortedSbp = [...buf.map(b => b.sbp)].sort((a, b) => a - b);
+          const sortedDbp = [...buf.map(b => b.dbp)].sort((a, b) => a - b);
+          const medianSbp = sortedSbp[Math.floor(sortedSbp.length / 2)];
+          const medianDbp = sortedDbp[Math.floor(sortedDbp.length / 2)];
+
+          setSbp(medianSbp);
+          setDbp(medianDbp);
+          setRealtimeUpdatedAt(Date.now());
+        } else {
+          if (bpBuffer.current.length === 0) {
+            setSbp(null);
+            setDbp(null);
+          }
+        }
+      });
+
+      subPpgFile = O2Ring.addPpgFileListener(async (ppgFile) => {
+        const totalPoints = ppgFile.sampleInts?.length ?? 0;
+        console.log(`[PpgFile Received] Sample Rate: ${ppgFile.sampleRate}Hz | Data Points: ${totalPoints}`);
+
+        const patient = patientIdRef.current ?? (await syncPatientId());
+        if (!patient) {
+          console.warn("PPG File received but no patientId found.");
+          return;
+        }
+
+        try {
+          // 1. Save PPG CSV locally on disk
+          const savedPpg = await savePpgCsv({
+            sampleInts: ppgFile.sampleInts,
+            sampleRate: ppgFile.sampleRate,
+            startTime: ppgFile.sampleTime,
+            sn: ppgFile.sn,
+            patientId: patient,
+          });
+
+          // 2. Transmit raw JSON payload to server endpoint
+          await uploadRawPpgPayload({
+            sampleInts: ppgFile.sampleInts,
+            sampleRate: ppgFile.sampleRate,
+            startTime: ppgFile.sampleTime,
+            sn: ppgFile.sn,
+            patientId: patient,
+          });
+
+          // 3. (Optional) Auto-upload local PPG CSV if backend supports full CSV uploads
+          if (baseURL && savedPpg) {
+            await uploadPendingCsvs({
+              patientId: patient,
+              items: [savedPpg],
+              baseURL,
+            });
+          }
+        } catch (err) {
+          console.warn("Error saving/uploading PPG file: ", err);
         }
       });
 
@@ -589,40 +975,27 @@ const processReadQueue = useCallback(() => {
         }
       });
 
-      subDev = O2Ring.addDeviceFoundListener((dev) => {
-        setDevices((prev) => {
-          const exists = prev.some((item) => item.mac === dev.mac);
-          return exists ? prev : [...prev, dev];
-        });
+      // Device found listener is now dynamically bound to isScanning state below
 
-        const target = knownDevicesRef.current.find((d) => d.mac === dev.mac);
-        if (
-          target &&
-          !connectedDeviceRef.current &&
-          !connectingRef.current &&
-          !autoConnectingRef.current &&
-          autoReconnectEnabled.current
-        ) {
-          autoConnectingRef.current = true;
-          connectToDevice(dev)
-            .catch((err) =>
-              console.warn(
-                "Error@O2RingProvider.tsx/autoConnect previous device: ",
-                err
-              )
-            )
-            .finally(() => {
-              autoConnectingRef.current = false;
-            });
+      subDisc = O2Ring.addDisconnectedListener((evt) => {
+        const isProgrammatic = isManualConnectingRef.current || intentionalDisconnectRef.current || evt?.reason === 10 || evt?.reason === 0;
+
+        if (isProgrammatic) {
+          const now = Date.now();
+          if (now - lastDisconnectLogTime.current > 2000) {
+            lastDisconnectLogTime.current = now;
+            console.log("[O2Ring] Intentional or programmatic disconnect (reason: " + (evt?.reason ?? 0) + "). Cleaning up state.");
+          }
         }
-      });
 
-      subDisc = O2Ring.addDisconnectedListener(() => {
         const prevDevice = connectedDeviceRef.current;
-        const wasIntentional = intentionalDisconnectRef.current;
-        const isConnecting = connectingRef.current;
-        if (!wasIntentional && !isConnecting && prevDevice) {
-          setOfflineDevice(prevDevice);
+        const wasIntentional = intentionalDisconnectRef.current || isProgrammatic;
+        const isUnexpectedReason = evt?.reason != null && evt.reason > 0 && evt?.reason !== 10;
+        const isConnecting = connectingRef.current || isManualConnectingRef.current;
+
+        if (!wasIntentional && isUnexpectedReason && !isConnecting && prevDevice) {
+          // Auto-reconnect disabled per user request
+          setOfflineDevice(null);
         } else {
           setOfflineDevice(null);
         }
@@ -630,6 +1003,9 @@ const processReadQueue = useCallback(() => {
         setConnectedDevice(null);
         setSpo2(null);
         setPr(null);
+        setRr(null);
+        setSbp(null);
+        setDbp(null);
         setBattery(null);
         setBatteryState(null);
         setRealtimeUpdatedAt(null);
@@ -655,11 +1031,12 @@ const processReadQueue = useCallback(() => {
 
         setBattery(
           (() => {
+            const raw: unknown = info.battery;
             const parsed =
-              typeof info.battery === "number" && Number.isFinite(info.battery)
-                ? info.battery
-                : typeof info.battery === "string"
-                ? parseInt(info.battery.match(/-?\d+/)?.[0] ?? "", 10)
+              typeof raw === "number" && Number.isFinite(raw)
+                ? raw
+                : typeof raw === "string"
+                ? parseInt(raw.match(/-?\d+/)?.[0] ?? "", 10)
                 : null;
 
             return typeof parsed === "number" && !Number.isNaN(parsed)
@@ -670,12 +1047,12 @@ const processReadQueue = useCallback(() => {
 
         setBatteryState(
           (() => {
+            const raw: unknown = info.batteryState;
             const parsed =
-              typeof info.batteryState === "number" &&
-              Number.isFinite(info.batteryState)
-                ? info.batteryState
-                : typeof info.batteryState === "string"
-                ? parseInt(info.batteryState.match(/-?\d+/)?.[0] ?? "", 10)
+              typeof raw === "number" && Number.isFinite(raw)
+                ? raw
+                : typeof raw === "string"
+                ? parseInt(raw.match(/-?\d+/)?.[0] ?? "", 10)
                 : null;
 
             return typeof parsed === "number" && !Number.isNaN(parsed)
@@ -714,12 +1091,20 @@ const processReadQueue = useCallback(() => {
             if (missing.length > 0) {
               enqueueHistoryFiles(missing);
             } else {
-              // Nothing new to download -> ensure modal stays hidden
+              // Nothing new to download -> ensure modal stays hidden & start real-time stream immediately!
               setIsDownloadingHistory(false);
+              isDownloadingHistoryRef.current = false;
               setDownloadProgress(0);
               totalFilesToDownload.current = 0;
               downloadedFiles.current = 0;
               setDownloadCounts({ total: 0, completed: 0 });
+
+              startRealtimeStream().catch((err) =>
+                console.warn("[O2Ring] subInfo startRealtimeStream error:", err)
+              );
+              O2Ring.setLiveWave(true).catch((err) =>
+                console.warn("[O2Ring] subInfo setLiveWave error:", err)
+              );
             }
           } catch (err) {
             console.warn("Error@O2RingProvider.tsx/subInfo filter: ", err);
@@ -766,6 +1151,9 @@ const processReadQueue = useCallback(() => {
             serial,
             patient
           );
+          if (saved) {
+            setHistoryLastSavedAt(Date.now());
+          }
 
           // Attempt immediate upload for newly downloaded file (best-effort; falls back to History screen auto-upload)
           if (baseURL) {
@@ -805,6 +1193,9 @@ const processReadQueue = useCallback(() => {
 
     return () => {
       subRt?.remove();
+      subRtPpg?.remove();
+      subPpgFile?.remove();
+      subWave?.remove();
       subErr?.remove();
       subDev?.remove();
       subDisc?.remove();
@@ -820,21 +1211,28 @@ const processReadQueue = useCallback(() => {
         readTimeout.current = null;
       }
     };
-  }, []);
+  }, [startRealtimeStream, syncPatientId]);
 
   /**
    * Start scanning for O2Ring devices
    */
   const startScan = useCallback(async () => {
+    isNativeModuleAvailable();
+    if (isScanningRef.current) return true;
+
     const ok = hasPermission ? true : await requestPermissions();
     if (!ok) return false;
 
+    isScanningRef.current = true;
     setDevices([]);
     setIsScanning(true);
     try {
+      await O2Ring.stopScan().catch(() => {});
+      await new Promise((r) => setTimeout(r, 300));
       await O2Ring.scan();
       return true;
     } catch (e) {
+      isScanningRef.current = false;
       console.warn("Error@O2RingProvider.tsx/startScan: ", e);
       setIsScanning(false);
       return false;
@@ -842,6 +1240,7 @@ const processReadQueue = useCallback(() => {
   }, [hasPermission, requestPermissions]);
 
   const stopScan = useCallback(async () => {
+    isScanningRef.current = false;
     setIsScanning(false);
     try {
       await O2Ring.stopScan();
@@ -850,32 +1249,7 @@ const processReadQueue = useCallback(() => {
     }
   }, []);
 
-  /**
-   * Auto-scan once for the last connected device and attempt reconnect.
-   */
-  useEffect(() => {
-    if (knownDevices.length === 0) return;
-    if (connectedDeviceRef.current || connectingRef.current) return;
-    if (autoReconnectAttempted.current) return;
-
-    autoReconnectAttempted.current = true;
-
-    const run = async () => {
-      const started = await startScan();
-      if (!started) return;
-
-      if (autoReconnectScanTimeout.current) {
-        clearTimeout(autoReconnectScanTimeout.current);
-      }
-
-      autoReconnectScanTimeout.current = setTimeout(() => {
-        autoReconnectScanTimeout.current = null;
-        stopScan();
-      }, 10000);
-    };
-
-    run();
-  }, [knownDevices, startScan, stopScan]);
+  // Auto-reconnect disabled per user preference.
 
   /**
    * Connect to a given O2Ring device
@@ -885,6 +1259,8 @@ const processReadQueue = useCallback(() => {
     const connectToDevice = useCallback(
       async (device: DeviceItem) => {
         // Any manual connect should re-enable auto-reconnect until the user explicitly disconnects again.
+        resetSessionCalibration();
+        isManualConnectingRef.current = true;
         autoReconnectEnabled.current = true;
         setConnecting(true);
         connectingRef.current = true;
@@ -919,23 +1295,72 @@ const processReadQueue = useCallback(() => {
         setBattery(null);
         setRealtimeUpdatedAt(null);
 
-        // Reset serviceReady for iOS when starting a fresh connection
-        if (Platform.OS === "ios") {
-          setServiceReady(false);
+        // Reset serviceReady when starting a fresh connection
+        setServiceReady(false);
+        serviceReadyRef.current = false;
+        setIosRealtimeReady(false);
+        const effectiveModel = resolveDeviceModel(device.name, device.model);
+        const resolvedDevice = { ...device, model: effectiveModel };
+        console.log("[O2Ring] connecting", resolvedDevice.name, "model:", effectiveModel);
+
+        // Set connected ref early so listeners know before async connect finishes
+        connectedDeviceRef.current = resolvedDevice;
+        setConnectedDevice(resolvedDevice);
+        rememberDevice(resolvedDevice);
+        connectionTimeRef.current = Date.now();
+
+        const connectPromise = O2Ring.connect(resolvedDevice.mac, resolvedDevice.model);
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Connection timed out. Please ensure the device is turned on and nearby.")), 12000)
+        );
+        await Promise.race([connectPromise, timeoutPromise]);
+
+        // Verify true device reachability (detect Android phantom connections when device is off)
+        if (Platform.OS === "android") {
+          try {
+            const infoPromise = O2Ring.getInfo();
+            const infoTimeout = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error("Device is offline")), 5000)
+            );
+            await Promise.race([infoPromise, infoTimeout]);
+          } catch (err) {
+            await O2Ring.disconnect().catch(() => {});
+            connectedDeviceRef.current = null;
+            setConnectedDevice(null);
+            throw new Error("Device is turned off or unreachable. Please turn on your O2Ring.");
+          }
         }
-        setIosRealtimeReady(Platform.OS === "android");
 
-        await O2Ring.connect(device.mac, device.model);
-
-        // Mark as connected; realtime will start when onServiceReady fires
-        setConnectedDevice(device);
-        rememberDevice(device);
+        // Apply saved BP calibration once upon successful connection
+        AsyncStorage.getItem("settings:bp_calibration").then((stored) => {
+          if (stored) {
+            try {
+              const parsed = JSON.parse(stored);
+              if (parsed.sbp != null && parsed.dbp != null && O2Ring.setBpCalibration) {
+                O2Ring.setBpCalibration(Math.round(parsed.sbp), Math.round(parsed.dbp)).catch(() => {});
+              }
+            } catch {}
+          }
+        }).catch(() => {});
 
           return true;
-        } catch (e) {
-          console.warn("Error@O2RingProvider.tsx/connectToDevice: ", e);
+        } catch (e: any) {
+          intentionalDisconnectRef.current = true;
+          await O2Ring.disconnect().catch(() => {});
+          intentionalDisconnectRef.current = false;
+          console.error("ERROR@O2RingProvider.tsx/connectToDevice failed:", {
+            message: e?.message,
+            code: e?.code,
+            stack: e?.stack,
+            device: resolvedDevice,
+          });
+          Alert.alert("Connection Failed", e?.message ?? "Failed to connect to device. Please try again.");
           return false;
         } finally {
+          setTimeout(() => {
+            isManualConnectingRef.current = false;
+          }, 3000);
+          intentionalDisconnectRef.current = false;
           setConnecting(false);
           connectingRef.current = false;
         }
@@ -946,41 +1371,109 @@ const processReadQueue = useCallback(() => {
   /**
    * Disconnect from the current device
    */
-  const disconnect = useCallback(async () => {
+  const executeActualDisconnect = useCallback(async () => {
+    // If a history file is currently downloading or queued, defer disconnect until download finishes!
+    if (isDownloadingHistoryRef.current || readQueue.current.length > 0 || currentReading.current != null) {
+      console.log("[O2Ring] History download in progress; deferring disconnect until sync completes.");
+      return;
+    }
+
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    setDisconnectCountdown(null);
     try {
+      if (serviceReadyRef.current && connectedDeviceRef.current) {
+        try {
+          await O2Ring.getInfo();
+          await new Promise((r) => setTimeout(r, 1000));
+        } catch {}
+      }
       intentionalDisconnectRef.current = true;
       await O2Ring.disconnect();
+      await new Promise((r) => setTimeout(r, 400));
     } catch (e) {
       console.warn("Error@O2RingProvider.tsx/disconnect: ", e);
+    } finally {
+      isAutoDisconnectActiveRef.current = false;
+      if (offFingerTimerRef.current) {
+        clearTimeout(offFingerTimerRef.current);
+        offFingerTimerRef.current = null;
+      }
       intentionalDisconnectRef.current = false;
+      autoReconnectEnabled.current = false;
+      if (infoRetryTimer.current) {
+        clearInterval(infoRetryTimer.current);
+        infoRetryTimer.current = null;
+        infoRetryCount.current = 0;
+      }
+      if (readTimeout.current) {
+        clearTimeout(readTimeout.current);
+        readTimeout.current = null;
+      }
+      readQueue.current = [];
+      currentReading.current = null;
+      readAttempts.current.clear();
+      setConnectedDevice(null);
+      setSpo2(null);
+      setPr(null);
+      setRr(null);
+      setSbp(null);
+      setDbp(null);
+      resetSessionCalibration();
+      setRealtimeUpdatedAt(null);
+      setIsDownloadingHistory(false);
+      setDownloadProgress(0);
+      totalFilesToDownload.current = 0;
+      downloadedFiles.current = 0;
+      setDownloadCounts({ total: 0, completed: 0 });
+      setServiceReady(Platform.OS === "android");
+      setIosRealtimeReady(Platform.OS === "android");
+      setOfflineDevice(null);
     }
-    // Disable auto-reconnect after an explicit user disconnect.
-    autoReconnectEnabled.current = false;
-    if (infoRetryTimer.current) {
-      clearInterval(infoRetryTimer.current);
-      infoRetryTimer.current = null;
-      infoRetryCount.current = 0;
+  }, [resetSessionCalibration]);
+
+  const cancelDisconnect = useCallback(() => {
+    isAutoDisconnectActiveRef.current = false;
+    if (offFingerTimerRef.current) {
+      clearTimeout(offFingerTimerRef.current);
+      offFingerTimerRef.current = null;
     }
-    if (readTimeout.current) {
-      clearTimeout(readTimeout.current);
-      readTimeout.current = null;
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
     }
-    readQueue.current = [];
-    currentReading.current = null;
-    readAttempts.current.clear();
-    setConnectedDevice(null);
-    setSpo2(null);
-    setPr(null);
-    setRealtimeUpdatedAt(null);
-    setIsDownloadingHistory(false);
-    setDownloadProgress(0);
-    totalFilesToDownload.current = 0;
-    downloadedFiles.current = 0;
-    setDownloadCounts({ total: 0, completed: 0 });
-    setServiceReady(Platform.OS === "android");
-    setIosRealtimeReady(Platform.OS === "android");
-    setOfflineDevice(null);
+    setDisconnectCountdown(null);
   }, []);
+
+  const startAutoDisconnectCountdown = useCallback(() => {
+    if (disconnectCountdown != null || countdownTimerRef.current != null) return;
+    isAutoDisconnectActiveRef.current = true;
+    setDisconnectCountdown(5);
+
+    if (serviceReadyRef.current && connectedDeviceRef.current) {
+      // Send immediate getInfo ping to reset ring auto-off timer and start history sync
+      O2Ring.getInfo().catch(() => {});
+      requestHistorySync().catch(() => {});
+    }
+
+    countdownTimerRef.current = setInterval(() => {
+      setDisconnectCountdown((prev) => {
+        if (prev == null || prev <= 1) {
+          if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+          countdownTimerRef.current = null;
+          executeActualDisconnect();
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, [requestHistorySync, executeActualDisconnect]);
+
+  const disconnect = useCallback(async () => {
+    await executeActualDisconnect();
+  }, [executeActualDisconnect]);
 
   /**
    * Manually restart realtime streaming if the UI needs a fresh feed
@@ -1097,10 +1590,208 @@ const processReadQueue = useCallback(() => {
     return { id: fileName, uri: file.uri };
   };
 
+  /**
+   * Helper to save raw PPG signal data into a CSV file with timeout & chunking safety
+   */
+  const savePpgCsv = async (params: {
+    sampleInts: number[];
+    sampleRate: number;
+    startTime: number;
+    sn: string;
+    patientId: string;
+  }): Promise<UploadItem | null> => {
+    const { sampleInts, sampleRate, startTime, sn, patientId } = params;
+
+    // 1. Guard against null/empty buffers (Fix 3: Handle Read Timeout)
+    if (!sampleInts || !Array.isArray(sampleInts) || sampleInts.length === 0) {
+      console.warn("[savePpgCsv] Warning: Received empty or incomplete PPG array (likely due to read timeout). Skipping CSV creation.");
+      return null;
+    }
+
+    try {
+      // 2. Efficiently build CSV string to prevent JS memory heap spikes on large streams
+      const fs = sampleRate > 0 ? sampleRate : 125;
+      const rawStart = startTime && !isNaN(startTime) ? startTime : Date.now() / 1000;
+      const startMs = rawStart > 1e11 ? rawStart : rawStart * 1000;
+      const totalSamples = sampleInts.length;
+
+      const lines: string[] = ["timestamp_ms,sample_index,time_s,ppg_value"];
+      for (let i = 0; i < totalSamples; i++) {
+        const t = i / fs;
+        lines.push(
+          `${Math.round(startMs + t * 1000)},${i},${t.toFixed(3)},${sampleInts[i]}`
+        );
+      }
+      const csvContent = lines.join("\n");
+
+      // 3. Build filename matching naming convention
+      const last4 = (sn || "Device").slice(-4);
+
+      // Ensure valid timestamp fallback if startTime is bad/undefined
+      const validStartTime = startTime && !isNaN(startTime) ? startTime : Date.now() / 1000;
+      const ts = new Date(validStartTime * 1000);
+
+      const pad = (n: number) => n.toString().padStart(2, "0");
+      const timeStr = `${ts.getFullYear()}${pad(ts.getMonth() + 1)}${pad(
+        ts.getDate()
+      )}${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
+
+      const fileName = `PPG_Raw_${last4}_${timeStr}.csv`;
+
+      // 4. Write file into patient's o2data folder via History.ts helper
+      const dir = await ensureDir(patientId);
+      const file = new ExpoFile(dir, fileName);
+
+      if (file.exists) {
+        await file.delete();
+      }
+
+      await file.write(csvContent, { encoding: "utf8" });
+
+      console.log(`[PPG CSV Saved]: ${fileName} (${totalSamples} samples written)`);
+      return { id: fileName, uri: file.uri };
+
+    } catch (error) {
+      console.error("[savePpgCsv] Error generating/saving PPG CSV:", error);
+      return null;
+    }
+  };
+
   const isRealtimeReady =
     Platform.OS === "android"
       ? !!connectedDevice
       : serviceReady && iosRealtimeReady && !!connectedDevice;
+
+    // ---- Overnight PPG: native code records chunks; JS uploads them ----
+      const ppgDirRef = useRef<string | null>(null);
+      const ppgFlushing = useRef(false);
+      const PPG_CHUNK_SECONDS = 600;
+      const flushPpgChunks = useCallback(async () => {
+        if (nativeUploadRef.current) return;
+        const dirPath = ppgDirRef.current;
+        const patientId = patientIdRef.current;
+        if (!dirPath || !patientId || !baseURL || ppgFlushing.current) return;
+        ppgFlushing.current = true;
+        try {
+          const dir = new Directory("file://" + dirPath);
+          const files = (dir.list() as any[])
+            .filter((it) => typeof it?.name === "string" && it.name.startsWith("PPG_Raw") && it.name.endsWith(".csv"))
+            .sort((a, b) => (a.name < b.name ? -1 : 1));
+          for (const f of files) {
+            try {
+              await uploadCsv({ patientId, item: { id: f.name, uri: f.uri }, baseURL });
+              f.delete();
+              console.log("[PPG Chunk] uploaded and removed", f.name);
+              O2Ring.logEvent(`uploaded ${f.name}`);
+            } catch (err) {
+              console.warn("[PPG Chunk] upload failed, will retry:", f.name, err);
+              O2Ring.logEvent(`upload failed ${f.name}: ${String(err)}`);
+              break; // network is probably down; try again later
+            }
+          }
+        } catch (err) {
+          console.warn("[PPG Chunk] could not list chunk folder:", err);
+        } finally {
+          ppgFlushing.current = false;
+        }
+      }, [baseURL]);
+
+      // Lives for the whole provider lifetime, so the last chunk's event is never missed
+      useEffect(() => {
+        const sub = O2Ring.addPpgChunkReadyListener((e) => {
+          console.log("[PPG Chunk] ready:", e.name, "rows:", e.rows);
+          if (e.dir) ppgDirRef.current = e.dir;
+          flushPpgChunks();
+        });
+        const timer = setInterval(() => { O2Ring.logEvent("js tick"); flushPpgChunks(); }, 5 * 60 * 1000);
+        return () => { sub.remove(); clearInterval(timer); };
+      }, [flushPpgChunks]);
+
+  // Re-bind addDeviceFoundListener whenever isScanning changes, preventing stale/dead event emitters
+  useEffect(() => {
+    let sub: any = null;
+    if (isScanning) {
+      sub = O2Ring.addDeviceFoundListener((dev: DeviceItem) => {
+        setDevices((prev) => {
+          const exists = prev.some((item) => item.mac === dev.mac);
+          return exists ? prev : [...prev, dev];
+        });
+      });
+    }
+    return () => {
+      sub?.remove();
+    };
+  }, [isScanning]);
+      useEffect(() => {
+        if (Platform.OS !== "android") return;
+        if (!connectedDevice || isDownloadingHistory) return;
+        let cancelled = false;
+
+        const start = async () => {
+          try {
+            if (Number(Platform.Version) >= 33) {
+              await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+            }
+            const patientId = patientIdRef.current ?? (await syncPatientId());
+            if (cancelled) return;
+            if (!patientId) { console.warn("[PPG] no patient id yet, not starting"); return; }
+            const last4 = String((connectedDevice as any)?.name ?? "device").slice(-4).replace(/\W/g, "");
+            nativeUploadRef.current = (await O2Ring.configurePpgUpload(
+              `${baseURL}/staff/o2ring-data/upload.php`,
+              authHeader ?? "",
+              patientId
+            )) === true;
+            const dir = await O2Ring.startPpgCapture(patientId, `PPG_Raw_${last4}`, PPG_CHUNK_SECONDS);
+            if (cancelled) { O2Ring.stopPpgCapture?.().catch(() => {}); return; }
+            ppgDirRef.current = dir;
+            console.log("[PPG] continuous capture started, chunks in", dir);
+
+            // Reset calibration counter and timestamps for the new recording session
+            resetSessionCalibration();
+
+            flushPpgChunks(); // upload anything left from an earlier session
+          } catch (e) {
+            console.warn("[PPG] could not start capture:", e);
+          }
+        };
+        const t = setTimeout(start, 5000);
+
+        return () => {
+          cancelled = true;
+          clearTimeout(t);
+          if (typeof O2Ring.stopPpgCapture === "function") {
+            O2Ring.stopPpgCapture().catch(() => {});
+          }
+        };
+      }, [connectedDevice, isDownloadingHistory, flushPpgChunks]);
+
+      // Pause recording while the ring's history downloads. Runs only when this flag changes,
+      // not when the screen closes, so swiping the app away does not stop recording.
+      useEffect(() => {
+        if (Platform.OS !== "android") return;
+        if (isDownloadingHistory) {
+          O2Ring.stopPpgCapture?.().catch(() => {});
+        }
+      }, [isDownloadingHistory]);
+
+  const isValidSpo2 = (v: number) => v >= 20 && v <= 100;
+  const spo2Series = useReadingSeries(spo2, realtimeUpdatedAt, isValidSpo2, connectedDevice?.mac);
+  const isValidPr = (v: number) => v >= 20 && v <= 250;
+  const prSeries = useReadingSeries(pr, realtimeUpdatedAt, isValidPr, connectedDevice?.mac);
+  const isSignalActive = spo2 != null && spo2 >= 20 && pr != null && pr >= 20;
+  const isValidBpVal = (v: number) => v >= 30 && v <= 220;
+  const isBpValid = isSignalActive && sbp != null && dbp != null && sbp >= 30 && dbp >= 30;
+  const activeSbp = isBpValid ? Math.max(sbp, dbp) : null;
+  const activeDbp = isBpValid ? Math.min(sbp, dbp) : null;
+
+  const sbpSeries = useReadingSeries(activeSbp, realtimeUpdatedAt, isValidBpVal, connectedDevice?.mac);
+  const dbpSeries = useReadingSeries(activeDbp, realtimeUpdatedAt, isValidBpVal, connectedDevice?.mac);
+  const isValidMotion = (v: number) => v >= 0 && v <= 235;
+  const filteredMotion = motion != null ? Math.max(0, motion - 20) : 0;
+  const motionSeries = useReadingSeries(filteredMotion, realtimeUpdatedAt, isValidMotion, connectedDevice?.mac);
+  const rrValue = isSignalActive && pr != null && pr > 0 ? calculateRespiratoryRate([pr]) : null;
+  const isValidRr = (v: number) => v >= 5 && v <= 60;
+  const rrSeries = useReadingSeries(rrValue, realtimeUpdatedAt, isValidRr, connectedDevice?.mac);
 
   const value = useMemo(
     () => ({
@@ -1118,11 +1809,24 @@ const processReadQueue = useCallback(() => {
       knownDevices,
       spo2,
       pr,
+      rr,
+      sbp,
+      dbp,
+      isBpStabilizing,
+      pi,
+      motion,
       realtimeUpdatedAt,
       isDownloadingHistory,
+      historyLastSavedAt,
       downloadProgress,
       downloadTotalFiles: downloadCounts.total,
       downloadCompletedFiles: downloadCounts.completed,
+      spo2Series,
+      prSeries,
+      sbpSeries,
+      dbpSeries,
+      motionSeries,
+      rrSeries,
       requestPermissions,
       startScan,
       stopScan,
@@ -1130,6 +1834,9 @@ const processReadQueue = useCallback(() => {
       forgetDevice,
       tempForgetDevice,
       disconnect,
+      disconnectCountdown,
+      cancelDisconnect,
+      executeActualDisconnect,
       clearOfflineDevice,
       clearDevices,
       refreshRealtime,
@@ -1150,8 +1857,18 @@ const processReadQueue = useCallback(() => {
       knownDevices,
       spo2,
       pr,
+      rr,
+      sbp,
+      dbp,
+      isBpStabilizing,
+      calibrationTimes,
+      calibrationCount,
+      addCalibrationTimestamp,
+      pi,
+      motion,
       realtimeUpdatedAt,
       isDownloadingHistory,
+      historyLastSavedAt,
       downloadProgress,
       downloadCounts.total,
       downloadCounts.completed,
@@ -1162,17 +1879,32 @@ const processReadQueue = useCallback(() => {
       forgetDevice,
       tempForgetDevice,
       disconnect,
+      disconnectCountdown,
+      cancelDisconnect,
+      executeActualDisconnect,
       clearOfflineDevice,
       clearDevices,
       refreshRealtime,
       requestHistorySync,
+      spo2Series,
+      prSeries,
+      sbpSeries,
+      dbpSeries,
+      motionSeries,
+      rrSeries,
     ]
   );
 
   return (
-    <O2RingContext.Provider value={value}>{children}</O2RingContext.Provider>
-  );
-}
+      <O2RingContext.Provider value={value}>
+        {/* O2RingBpStreamListener isn't defined yet; re-enable once it exists
+        {isNativeModuleAvailable && <O2RingBpStreamListener />}
+        */}
+        {children}
+      </O2RingContext.Provider>
+    );
+  }
+
 
 export function useO2Ring() {
   const ctx = useContext(O2RingContext);

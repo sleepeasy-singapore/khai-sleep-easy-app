@@ -1,4 +1,8 @@
 import { EventEmitter, requireNativeModule } from "expo-modules-core";
+import { NativeModules, Platform } from 'react-native';
+// Check if the module is linked on Android
+const ViatomModule = NativeModules.Viatom;
+
 
 type NativeViatomModule = {
   requestPermissions(): Promise<boolean>;
@@ -11,6 +15,13 @@ type NativeViatomModule = {
   stopRealtime(): Promise<boolean>;
   getInfo(): Promise<boolean>;
   readHistoryFile(filename: string): Promise<boolean>;
+  startPpgCapture(patientId: string, prefix: string, chunkSeconds: number): Promise<string>;
+  stopPpgCapture(): Promise<boolean>;
+  stopPpgService(): Promise<boolean>;
+  logEvent(message: string): Promise<boolean>;
+  configurePpgUpload(uploadUrl: string, authHeader: string, patientId: string): Promise<boolean>;
+  setLiveWave(enabled: boolean): Promise<boolean>;
+  setBpCalibration(sbp: number, dbp: number): Promise<boolean>;
 };
 
 const Native: NativeViatomModule = requireNativeModule("Viatom");
@@ -42,10 +53,19 @@ export type ServiceReadyEvent = {
 export type RealtimeEvent = {
   spo2: number;
   pr: number;
+  rr?: number;
   pi: number;
   motion: number;
   ts: number;
 };
+
+export type RtPpgEvent = {
+    ir: number[];
+    red: number[];
+    motion: number[];
+    size: number;
+    ts: number;
+  };
 
 export type InfoEvent = {
   battery?: number | null;
@@ -58,6 +78,13 @@ export type HistoryFileEvent = {
   csv: string;
   startTime: number;
 };
+
+  export type PpgFileEvent = {
+    sampleInts: number[];
+    sampleRate: number;
+    sampleTime: number;
+    sn: string;
+  };
 
 export type ReadProgressEvent = {
   progress: number;
@@ -115,45 +142,134 @@ export function readHistoryFile(filename: string) {
 export function addDeviceFoundListener(
   listener: (e: DeviceFoundEvent) => void
 ) {
-  return emitter.addListener<DeviceFoundEvent>("onDeviceFound", listener);
+  return (emitter.addListener as any)("onDeviceFound", listener);
 }
 
 export function addConnectedListener(listener: (e: ConnectedEvent) => void) {
-  return emitter.addListener<ConnectedEvent>("onConnected", listener);
+  return (emitter.addListener as any)("onConnected", listener);
 }
 
 export function addDisconnectedListener(
   listener: (e: DisconnectedEvent) => void
 ) {
-  return emitter.addListener<DisconnectedEvent>("onDisconnected", listener);
+  return (emitter.addListener as any)("onDisconnected", listener);
 }
 
 export function addServiceReadyListener(
   listener: (e: ServiceReadyEvent) => void
 ) {
-  return emitter.addListener<ServiceReadyEvent>("onServiceReady", listener);
+  return (emitter.addListener as any)("onServiceReady", listener);
 }
 
 export function addRealtimeListener(listener: (e: RealtimeEvent) => void) {
-  return emitter.addListener<RealtimeEvent>("onRealtime", listener);
+  return (emitter.addListener as any)("onRealtime", listener);
+}
+
+export function addRtPpgListener(listener: (e: RtPpgEvent) => void) {
+  return (emitter.addListener as any)("onRtPpg", listener);
+}
+
+export type BloodPressureEvent = {
+  sbp: number;
+  dbp: number;
+  ts: number;
+};
+
+export function addBloodPressureListener(
+  listener: (e: BloodPressureEvent) => void
+) {
+  return (emitter.addListener as any)("onBloodPressure", listener);
+}
+
+export function addWaveformReceivedListener(
+  listener: (e: { wFs: number[]; ts: number }) => void
+) {
+  return (emitter.addListener as any)("onWaveformReceived", listener);
 }
 
 export function addInfoListener(listener: (e: InfoEvent) => void) {
-  return emitter.addListener<InfoEvent>("onInfo", listener);
+  return (emitter.addListener as any)("onInfo", listener);
 }
 
 export function addHistoryFileListener(
   listener: (e: HistoryFileEvent) => void
 ) {
-  return emitter.addListener<HistoryFileEvent>("onHistoryFile", listener);
+  return (emitter.addListener as any)("onHistoryFile", listener);
 }
 
 export function addReadProgressListener(
   listener: (e: ReadProgressEvent) => void
 ) {
-  return emitter.addListener<ReadProgressEvent>("onReadProgress", listener);
+  return (emitter.addListener as any)("onReadProgress", listener);
 }
 
 export function addErrorListener(listener: (e: ErrorEvent) => void) {
-  return emitter.addListener<ErrorEvent>("onError", listener);
+  return (emitter.addListener as any)("onError", listener);
+}
+
+export function addPpgFileListener(listener: (e: PpgFileEvent) => void) {
+  return (emitter.addListener as any)("onPpgFile", listener);
+}
+
+export type PpgChunkReadyEvent = {
+  path: string;
+  name: string;
+  dir: string;
+  rows: number;
+  startTs: number;
+};
+
+export function startPpgCapture(patientId: string, prefix: string, chunkSeconds: number) {
+  return Native.startPpgCapture(patientId, prefix, chunkSeconds);
+}
+
+export function stopPpgCapture() {
+  return Native.stopPpgCapture();
+}
+
+export function stopPpgService() {
+  return Native.stopPpgService();
+}
+
+export function addPpgChunkReadyListener(listener: (e: PpgChunkReadyEvent) => void) {
+  return (emitter.addListener as any)("onPpgChunkReady", listener);
+}
+
+export function logEvent(message: string) {
+  try {
+    return Promise.resolve(Native.logEvent(message)).catch(() => false);
+  } catch {
+    return Promise.resolve(false);
+  }
+}
+
+export function configurePpgUpload(uploadUrl: string, authHeader: string, patientId: string) {
+  try {
+    return Promise.resolve(Native.configurePpgUpload(uploadUrl, authHeader, patientId)).catch(() => false);
+  } catch {
+    return Promise.resolve(false);
+  }
+}
+
+export function setBpCalibration(sbp: number, dbp: number) {
+  try {
+    return Promise.resolve(Native.setBpCalibration(sbp, dbp)).catch(() => false);
+  } catch {
+    return Promise.resolve(false);
+  }
+}
+
+export type PpgPacketEvent = { samples: number[]; ts: number };
+
+// The live screen turns this on while it is open (the module sends samples to JavaScript only then)
+export function setLiveWave(enabled: boolean) {
+  try {
+    return Promise.resolve(Native.setLiveWave(enabled)).catch(() => false);
+  } catch {
+    return Promise.resolve(false);
+  }
+}
+
+export function addPpgPacketListener(listener: (e: PpgPacketEvent) => void) {
+  return (emitter.addListener as any)("onPpgPacket", listener);
 }

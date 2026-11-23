@@ -3,13 +3,13 @@
     "name": "SleepEasy",
     "slug": "sleep-easy-app",
     "scheme": "sleep-easy-app",
-    "version": "1.0.0",
+    "version": "1.3.4",
     "orientation": "portrait",
     "icon": "./assets/sleepeasylogo-android.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/sleepeasylogo-android.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -20,7 +20,11 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.sleepeasy.app"
+      "bundleIdentifier": "com.sleepeasy.app",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "SleepEasy requires Bluetooth to connect to and sync data from your O2Ring device.",
+        "NSBluetoothPeripheralUsageDescription": "SleepEasy requires Bluetooth access to discover nearby O2Ring devices."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -38,7 +42,25 @@
       "./app.plugin.js",
       "expo-router",
       "expo-font",
-      "expo-asset",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "enableSceneSupport": true
+          },
+          "android": {
+            "usesCleartextTraffic": true,
+            "ndkVersion": "26.1.10909125",
+            "packagingOptions": {
+              "pickFirst": [
+                "**/libreactnative.so",
+                "**/libc++_shared.so"
+              ]
+            },
+            "abiFilters": ["arm64-v8a", "x86_64"]
+          }
+        }
+      ],
       [
         "expo-share-intent",
         {
@@ -54,7 +76,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "d0f45c21-0674-48c6-b03c-37882490281a"
+        "projectId": "fb24647a-0e66-494f-b8a2-17e2efd6656e"
       }
     }
   }

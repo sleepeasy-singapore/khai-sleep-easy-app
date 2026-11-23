@@ -1,0 +1,175 @@
+import React, { useEffect, useState } from "react";
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useTheme } from "../theme/ThemeProvider";
+import { useRouter, useLocalSearchParams } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as O2Ring from "@ios-app/viatom-o2ring";
+import { useO2Ring } from "../service/O2RingProvider";
+import { Ionicons } from "@expo/vector-icons";
+
+export const BP_CALIBRATION_KEY = "settings:bp_calibration";
+
+export default function BpCalibrationScreen() {
+  const { colors: C, fonts: F } = useTheme();
+  const router = useRouter();
+  const { from } = useLocalSearchParams<{ from?: string }>();
+  const { addCalibrationTimestamp } = useO2Ring();
+  const [sbp, setSbp] = useState("120.0");
+  const [dbp, setDbp] = useState("80.0");
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    AsyncStorage.getItem(BP_CALIBRATION_KEY).then((stored) => {
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (parsed.sbp != null) setSbp(String(parsed.sbp));
+          if (parsed.dbp != null) setDbp(String(parsed.dbp));
+        } catch {}
+      }
+      setIsLoading(false);
+    }).catch(() => {
+      setIsLoading(false);
+    });
+  }, []);
+
+  const handleExit = () => {
+    if (from === "home") {
+      router.replace("/(tabs)/home");
+    } else {
+      router.replace("/(tabs)/settings");
+    }
+  };
+
+  const handleSave = async () => {
+    const sbpNum = parseFloat(sbp);
+    const dbpNum = parseFloat(dbp);
+    if (isNaN(sbpNum) || isNaN(dbpNum) || sbpNum <= dbpNum || sbpNum > 220 || dbpNum < 30) {
+      Alert.alert("Invalid Values", "Please enter valid baseline blood pressure values (SBP must be greater than DBP).");
+      return;
+    }
+
+    const now = Date.now();
+    let historyTimes: number[] = [];
+    try {
+      const stored = await AsyncStorage.getItem(BP_CALIBRATION_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed.calibrationTimes)) {
+          historyTimes = parsed.calibrationTimes;
+        } else if (parsed.calibrationTime != null) {
+          historyTimes = [parsed.calibrationTime];
+        }
+      }
+    } catch {}
+
+    historyTimes.push(now);
+    addCalibrationTimestamp?.(now);
+
+    const payload = {
+      sbp: sbpNum,
+      dbp: dbpNum,
+      calibrationTime: now,
+      calibrationTimes: historyTimes,
+      calibrationCount: historyTimes.length,
+    };
+    await AsyncStorage.setItem(BP_CALIBRATION_KEY, JSON.stringify(payload));
+    try {
+      // @ts-ignore
+      if (O2Ring.setBpCalibration) {
+        await O2Ring.setBpCalibration(Math.round(sbpNum), Math.round(dbpNum));
+      }
+    } catch {}
+
+    handleExit();
+  };
+
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      handleExit();
+    }
+  };
+
+  if (isLoading) return null;
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: C.bg }]} edges={["top", "bottom", "left", "right"]}>
+      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 14, backgroundColor: C.bg2, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border, marginBottom: 16 }}>
+        <TouchableOpacity onPress={handleBack} style={{ marginRight: 12, padding: 4 }} activeOpacity={0.7}>
+          <Ionicons name="arrow-back" size={24} color={C.text} />
+        </TouchableOpacity>
+        <Text style={{ fontSize: 18, fontWeight: "800", color: C.text }}>Blood Pressure Calibration</Text>
+      </View>
+
+      <View style={{ padding: 16, paddingTop: 4 }}>
+        <Text style={[styles.subtitle, { color: C.text, opacity: 0.85 }]}>
+          Enter baseline blood pressure values measured from a standard arm cuff for personal calibration.
+        </Text>
+
+        <View style={[styles.card, { backgroundColor: C.bg2, borderColor: C.border }]}>
+          <View style={styles.inputGroup}>
+            <Text style={[styles.label, { color: C.text }]}>Baseline Systolic (SBP, mmHg)</Text>
+            <TextInput
+              style={[styles.input, { backgroundColor: C.bg, color: C.text, borderColor: C.border }]}
+              keyboardType="decimal-pad"
+              value={sbp}
+              onChangeText={setSbp}
+              placeholder="120.0"
+              placeholderTextColor={C.sub}
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={[styles.label, { color: C.text }]}>Baseline Diastolic (DBP, mmHg)</Text>
+            <TextInput
+              style={[styles.input, { backgroundColor: C.bg, color: C.text, borderColor: C.border }]}
+              keyboardType="decimal-pad"
+              value={dbp}
+              onChangeText={setDbp}
+              placeholder="80.0"
+              placeholderTextColor={C.sub}
+            />
+          </View>
+        </View>
+
+        <TouchableOpacity
+          onPress={handleSave}
+          style={[styles.button, { backgroundColor: C.tint }]}
+          activeOpacity={0.85}>
+          <Text style={[F.buttonText, { color: C.white, fontSize: 13 }]}>Save Calibration</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={async () => {
+            await AsyncStorage.removeItem(BP_CALIBRATION_KEY);
+            setSbp("120.0");
+            setDbp("80.0");
+            try {
+              // @ts-ignore
+              if (O2Ring.setBpCalibration) {
+                await O2Ring.setBpCalibration(120, 80);
+              }
+            } catch {}
+            Alert.alert("Reset Successful", "Calibration has been reset to default (120/80 mmHg).");
+          }}
+          style={[styles.button, { backgroundColor: C.card, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border, marginTop: 10 }]}
+          activeOpacity={0.85}>
+          <Text style={[F.buttonText, { color: C.text, fontSize: 13 }]}>Reset to Default (120/80)</Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  subtitle: { fontSize: 12, marginBottom: 16, lineHeight: 18 },
+  card: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, padding: 16, marginBottom: 16 },
+  inputGroup: { marginBottom: 14 },
+  label: { fontSize: 12, fontWeight: "700", marginBottom: 6 },
+  input: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, padding: 10, fontSize: 14, fontWeight: "600" },
+  button: { marginTop: 8, height: 44, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+});

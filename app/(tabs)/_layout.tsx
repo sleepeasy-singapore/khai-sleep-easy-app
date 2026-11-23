@@ -18,8 +18,10 @@ export default function Layout() {
     if (Platform.OS === "android") {
       StatusBar.setBackgroundColor(C.bg2, true);
       // Bottom Android navigation bar
-      NavigationBar.setBackgroundColorAsync(C.bg2);
-      NavigationBar.setButtonStyleAsync(isDark ? "light" : "dark");
+      try {
+        NavigationBar.setBackgroundColorAsync(C.bg2);
+        NavigationBar.setButtonStyleAsync(isDark ? "light" : "dark");
+      } catch {}
     }
   }, [isDark, C.bg2]);
 
@@ -31,7 +33,7 @@ export default function Layout() {
 
   return (
     <Tabs
-      initialRouteName="history"
+      initialRouteName="home"
       screenOptions={({ route }) => {
         const baseRaw = route.name.split("/")[0];
         const base = baseRaw.toLowerCase();

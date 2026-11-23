@@ -10,7 +10,7 @@ import Social
 import UIKit
 
 class ShareViewController: UIViewController {
-  let hostAppGroupIdentifier = "group.com.sleepeasy.app"
+  let hostAppGroupIdentifier = "group.com.sleepeasy.app.patient"
   let shareProtocol = "sleep-easy-app"
   let sharedKey = "sleep-easy-appShareKey"
   var sharedMedia: [SharedMediaFile] = []
