@@ -33,12 +33,15 @@ export default function LiveMotionBarChart({
   const onLayout = (e: LayoutChangeEvent) =>
     setWidth(Math.round(e.nativeEvent.layout.width));
 
-  const max = 20;
+  const max = 50;
   const accent = "#F5A25D";
   const safePoints = points ?? [];
-  const t0 = safePoints.length > 0 ? safePoints[0].t : 0;
-  const tN = safePoints.length > 0 ? safePoints[safePoints.length - 1].t : 0;
-  const span = Math.max(tN - t0, 30000);
+  const last = safePoints.length > 0 ? safePoints[safePoints.length - 1].t : Date.now();
+  const windowMs = 2 * 60 * 1000;
+  const first = safePoints.length > 0 ? safePoints[0].t : last - windowMs;
+  const span = Math.max(last - first, windowMs);
+  const t0 = last - span;
+  const tN = last;
 
   return (
     <View style={[styles.card, { backgroundColor: C.bg2, borderColor: C.border }]}>
