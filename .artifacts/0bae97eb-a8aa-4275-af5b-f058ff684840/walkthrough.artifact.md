@@ -1,12 +1,12 @@
-# Startup Black Screen Elimination Walkthrough
+# Expo Updates URL Configuration Walkthrough
 
-Successfully updated [index.tsx](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/app/index.tsx).
+Successfully updated [app.config.js](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/app.config.js).
 
-## Changes Grade
+## Changes Made
 
-### Root Index Router (`index.tsx`)
-- **Clean Loading View (`#ffffff` with ActivityIndicator)**: Replaced the `null` return in root `Index` with a clean white background loading view while `AsyncStorage` checks session state. This completely eliminates the startup black screen flash on Android and iOS.
+### Expo Configuration (`app.config.js`)
+- **Configured `expo-updates` URL**: Added the official EAS update URL (`https://u.expo.dev/fb24647a-0e66-494f-b8a2-17e2efd6656e`) matching the project ID in `app.config.js`. This resolves the `InitializationError` warning from `expo-updates`.
 
 ## Verification Results
 - Verified with `analyze_file` (0 errors found).
-- App startup renders a smooth white splash-to-welcome transition without black screen flashes.
+- Expo updates configured correctly.
