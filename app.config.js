@@ -23,6 +23,9 @@ module.exports = ({ config }) => {
       checkAutomatically: "ON_LOAD",
       fallbackToCacheTimeout: 0,
     },
+    runtimeVersion: {
+      policy: "appVersion",
+    },
     ios: {
       supportsTablet: true,
       bundleIdentifier: isDistributor
