@@ -1,14 +1,12 @@
-# Swift Interop Type-Safe Wave Parsing Walkthrough
+# Motion Bar Chart Reversion Walkthrough
 
-Successfully updated [ViatomModule.swift](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/packages/viatom-o2ring/ios/ViatomModule.swift).
+Successfully updated [index.tsx](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/app/(tabs)/home/index.tsx).
 
 ## Changes Made
 
-### iOS Native Module (`ViatomModule.swift`)
-- **Removed Duplicate Declaration**: Cleaned up the duplicate `realDataCallBack` signature.
-- **Type-Safe `[NSNumber]` to `[Int]` Mapping**: Safely cast `wave.points` as `[NSNumber]` and mapped to `[Int]` (`rawPoints.map { $0.intValue }`), ensuring robust Objective-C / Swift interop for raw optical waveform points.
+### Home Dashboard (`index.tsx`)
+- **Reverted Motion to Bar Chart (`LiveMotionBarChart`)**: Replaced `LiveTrendChart` back with `LiveMotionBarChart` for Motion across both Stacked and Grid views, paired with the optimized max scale of `20` for clear visibility during movement.
 
 ## Verification Results
 - Verified with `analyze_file` (0 errors found).
-- Viatom module compiles and parses raw wave points safely.
-- walkthrough rendered.
+- Motion reverts to bar chart representation.

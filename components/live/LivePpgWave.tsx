@@ -130,13 +130,14 @@ const WaveLayer = React.memo(function WaveLayer({
 
       if (playing && n > 0) {
         if (queue.length === 0) {
-          playing = false;
+          if (buf.length > 0) {
+            buf.push(buf[buf.length - 1]);
+          }
         } else {
           const take = Math.min(n, queue.length);
-          for (let i = 0; i < take; i++) buf.push(queue[i]);
-          queue.splice(0, take);
-          if (buf.length > WINDOW_SAMPLES) buf.splice(0, buf.length - WINDOW_SAMPLES);
+          for (let i = 0; i < take; i++) buf.push(queue.shift()!);
         }
+        if (buf.length > WINDOW_SAMPLES) buf.splice(0, buf.length - WINDOW_SAMPLES);
       }
 
       const isWaitingNow = (now - lastData > 6000) && queue.length === 0 && buf.length === 0;
