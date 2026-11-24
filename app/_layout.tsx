@@ -57,7 +57,7 @@ function DownloadHistoryModal() {
       statusBarTranslucent
       // prevent Android back button from closing it
       onRequestClose={() => {}}>
-      <View style={styles.modalBackdrop}>
+      <View style={styles.modalBackdrop} pointerEvents="box-none">
         <View style={[styles.modalCard, { backgroundColor: C.bg2 }]}>
           <Text style={[styles.modalTitle, { color: C.text }]}>
             {t("o2ringDownloadingTitle")}
@@ -122,7 +122,7 @@ function DisconnectCountdownModal() {
       animationType="fade"
       statusBarTranslucent
       onRequestClose={cancelDisconnect}>
-      <View style={styles.modalBackdrop}>
+      <View style={styles.modalBackdrop} pointerEvents="box-none">
         <View style={[styles.modalCard, { backgroundColor: C.bg2, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border }]}>
           <ActivityIndicator size="large" color={C.tint} style={{ marginBottom: 16 }} />
           <Text style={[styles.modalTitle, { color: C.text, textAlign: "center" }]}>

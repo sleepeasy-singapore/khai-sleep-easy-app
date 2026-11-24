@@ -1,5 +1,6 @@
 import { router, useRootNavigationState } from "expo-router";
 import { useEffect } from "react";
+import { View, ActivityIndicator } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useShareIntentContext } from "expo-share-intent";
 
@@ -37,5 +38,9 @@ export default function Index() {
     checkAndNavigate();
   }, [navState?.key, hasShareIntent, shareIntent]);
 
-  return null;
+  return (
+    <View style={{ flex: 1, backgroundColor: "#ffffff", justifyContent: "center", alignItems: "center" }}>
+      <ActivityIndicator size="large" color="#22c55e" />
+    </View>
+  );
 }
