@@ -34,6 +34,17 @@ module.exports = ({ config }) => {
         NSBluetoothPeripheralUsageDescription:
           "SleepEasy requires Bluetooth access to discover nearby O2Ring devices.",
         UIBackgroundModes: ["bluetooth-central"],
+        UIApplicationSceneManifest: {
+          UIApplicationSupportsMultipleScenes: false,
+          UISceneConfigurations: {
+            UIWindowSceneSessionRoleApplication: [
+              {
+                UISceneConfigurationName: "Default Configuration",
+                UISceneDelegateClassName: "$(PRODUCT_MODULE_NAME).SceneDelegate",
+              },
+            ],
+          },
+        },
       },
     },
     android: {

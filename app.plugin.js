@@ -56,17 +56,58 @@ const withViatomDeps = (config) =>
     return config;
   });
 
-const withNoSceneManifest = (config) => {
-  return withInfoPlist(config, (config) => {
-    delete config.modResults.UIApplicationSceneManifest;
-    return config;
-  });
+const withSceneDelegate = (config) => {
+  return withDangerousMod(config, [
+    "ios",
+    async (config) => {
+      const iosRoot = path.join(config.modRequest.platformProjectRoot);
+      const dirs = fs.readdirSync(iosRoot);
+      const projDirName = dirs.find(
+        (d) =>
+          fs.existsSync(path.join(iosRoot, d, "AppDelegate.swift")) ||
+          fs.existsSync(path.join(iosRoot, d, "AppDelegate.mm"))
+      );
+      if (projDirName) {
+        const targetDir = path.join(iosRoot, projDirName);
+        const sceneDelegateCode = `import UIKit
+import Expo
+
+class SceneDelegate: ExpoAppSceneDelegate {
+  var window: UIWindow?
+
+  override func scene(
+    _ scene: UIScene,
+    willConnectTo session: UISceneSession,
+    options connectionOptions: UIScene.ConnectionOptions
+  ) {
+    guard let windowScene = scene as? UIWindowScene else { return }
+    let window = UIWindow(windowScene: windowScene)
+    self.window = window
+
+    if let appDelegate = UIApplication.shared.delegate as? AppDelegate,
+       let factory = appDelegate.reactNativeFactory {
+      factory.startReactNative(
+        withModuleName: "main",
+        in: window,
+        launchOptions: nil
+      )
+    }
+
+    super.scene(scene, willConnectTo: session, options: connectionOptions)
+  }
+}
+`;
+        fs.writeFileSync(path.join(targetDir, "SceneDelegate.swift"), sceneDelegateCode);
+      }
+      return config;
+    },
+  ]);
 };
 
 const plugin = (config) => {
   config = withViatomSettings(config);
   config = withViatomDeps(config);
-  config = withNoSceneManifest(config);
+  config = withSceneDelegate(config);
   return config;
 };
 

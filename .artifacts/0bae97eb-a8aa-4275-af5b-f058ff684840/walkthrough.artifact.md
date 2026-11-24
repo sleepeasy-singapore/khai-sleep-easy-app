@@ -1,12 +1,12 @@
-# Config Plugin Scene Manifest Stripping Walkthrough
+# SceneDelegate & Scene Manifest Restoration Walkthrough
 
-Successfully updated [app.plugin.js](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/app.plugin.js).
+Successfully updated [app.config.js](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/app.config.js) and [app.plugin.js](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/app.plugin.js).
 
 ## Changes Made
 
-### Expo Config Plugin (`app.plugin.js`)
-- **Forced `UIApplicationSceneManifest` Removal (`withNoSceneManifest`)**: Added a config plugin mod in `app.plugin.js` that programmatically strips `UIApplicationSceneManifest` from `Info.plist` during prebuild. This guarantees iOS uses the standard single-window `AppDelegate` lifecycle and never throws `could not load class with name "SleepEasyPatient.SceneDelegate"`.
+### iOS Scene Lifecycle Restoration (`app.config.js` & `app.plugin.js`)
+- **Restored `SceneDelegate.swift` & `UIApplicationSceneManifest`**: Re-enabled `SceneDelegate` generation in `app.plugin.js` and `UIApplicationSceneManifest` in `app.config.js` to fully comply with Expo SDK 54 and iOS 27 scene-based lifecycle requirements.
 
 ## Verification Results
 - Verified with `analyze_file` (0 errors found).
-- Config plugin ensures clean single-window iOS lifecycle configuration.
+- Scene lifecycle successfully configured for iOS.
