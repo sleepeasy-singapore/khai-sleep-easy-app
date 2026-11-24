@@ -339,23 +339,29 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       "motion": Int(realData.vector),
       "ts": Int(Date().timeIntervalSince1970 * 1000)
     ])
-
-    let hr = Double(realData.hr > 0 ? realData.hr : 75)
-    var waveSamples: [Int] = []
-    for i in 0..<64 {
-      let t = Double(i) / 64.0
-      let val = Int(50.0 + 40.0 * sin(t * 2.0 * .pi * (hr / 60.0)))
-      waveSamples.append(val)
-    }
-    emit("onPpgPacket", [
-      "samples": waveSamples,
-      "ts": Int(Date().timeIntervalSince1970 * 1000)
-    ])
   }
 
   @objc(realDataCallBackWithData:originalData:)
   func realDataCallBack(with data: Data!, originalData: Data!) {
     realDataCallBack(with: data)
+  }
+
+  @objc(realWaveCallBackWithData:)
+  func realWaveCallBack(with data: Data!) {
+    guard let data = data else { return }
+    let realWave = VTO2Parser.parseO2RealWave(with: data)
+    if let wave = realWave as? VTRealWave, let rawPoints = wave.points as? [NSNumber], !rawPoints.isEmpty {
+      let points = rawPoints.map { $0.intValue }
+      emit("onPpgPacket", [
+        "samples": points,
+        "ts": Int(Date().timeIntervalSince1970 * 1000)
+      ])
+    }
+  }
+
+  @objc(realWaveCallBackWithData:originalData:)
+  func realWaveCallBack(with data: Data!, originalData: Data!) {
+    realWaveCallBack(with: data)
   }
 
   @objc(readCompleteWithData:)
