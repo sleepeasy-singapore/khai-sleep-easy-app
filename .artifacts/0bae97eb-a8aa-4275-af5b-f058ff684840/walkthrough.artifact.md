@@ -1,12 +1,12 @@
-# Clean Realtime Timer Polling Walkthrough
+# Motion Chart Left-to-Right Time Window Walkthrough
 
-Successfully updated [ViatomModule.swift](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/packages/viatom-o2ring/ios/ViatomModule.swift).
+Successfully updated [LiveMotionBarChart.tsx](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/components/live/LiveMotionBarChart.tsx).
 
-## Changes Made
+## Changes Grade
 
-### iOS Native Module (`ViatomModule.swift`)
-- **Optimized `realtimeTimer`**: Reverted `realtimeTimer` to poll only `communicator.beginGetRealData()` every 1.0s, while `communicator.beginGetRealWave()` is invoked cleanly upon start/bootstrap/toggle. This prevents redundant BLE command spam.
+### Motion Bar Chart (`LiveMotionBarChart.tsx`)
+- **Left-to-Right Time Progress (`t0 = first`, `tN = first + span`)**: Updated time window calculations in `LiveMotionBarChart.tsx` to match `LiveTrendChart`. Motion activity bars now start on the left and progress toward the right over time, matching all other dashboard charts.
 
 ## Verification Results
 - Verified with `analyze_file` (0 errors found).
-- Realtime timer polls cleanly without command collisions.
+- Motion time axis starts from the left correctly.

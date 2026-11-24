@@ -358,8 +358,16 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
 
       let scaledPoints = doublePts.map { pt -> Int in
         let norm = (pt - minPt) / span
-        return Int(30.0 + norm * 160.0)
+        return Int(50.0 + norm * 120.0)
       }
+
+      let amplitude = maxPt - minPt
+      let motionVal = amplitude > 80 ? min(20, Int((amplitude - 80) / 15)) : 0
+
+      emit("onRealtime", [
+        "motion": motionVal,
+        "ts": Int(Date().timeIntervalSince1970 * 1000)
+      ])
 
       emit("onPpgPacket", [
         "samples": scaledPoints,
