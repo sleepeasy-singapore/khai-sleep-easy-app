@@ -33,7 +33,7 @@ export default function LiveMotionBarChart({
   const onLayout = (e: LayoutChangeEvent) =>
     setWidth(Math.round(e.nativeEvent.layout.width));
 
-  const max = 30;
+  const max = 50;
   const accent = "#F5A25D";
   const safePoints = points ?? [];
   const first = safePoints.length > 0 ? safePoints[0].t : Date.now();
