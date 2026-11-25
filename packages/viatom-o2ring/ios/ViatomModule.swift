@@ -380,7 +380,7 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       let minPt = doublePts.min() ?? 30
       let maxPt = doublePts.max() ?? 190
       let ac = maxPt - minPt
-      let motionVal = ac > 45.0 ? min(50, max(1, Int((ac - 45.0) / 2.5))) : 0
+      let motionVal = ac > 45.0 ? min(30, max(1, Int((ac - 45.0) / 2.0))) : 0
 
       emit("onRealtime", [
         "motion": motionVal,

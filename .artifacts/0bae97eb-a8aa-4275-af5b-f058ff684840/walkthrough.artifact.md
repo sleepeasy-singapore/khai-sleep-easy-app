@@ -1,12 +1,13 @@
-# Thread-Safe Event Emission Walkthrough
+# PPG Zero-Skip Filter & Motion Max Scale 30 Walkthrough
 
-Successfully updated [ViatomModule.swift](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/packages/viatom-o2ring/ios/ViatomModule.swift).
+Successfully updated [LivePpgWave.tsx](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/components/live/LivePpgWave.tsx), [LiveMotionBarChart.tsx](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/components/live/LiveMotionBarChart.tsx), and [ViatomModule.swift](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/packages/viatom-o2ring/ios/ViatomModule.swift).
 
 ## Changes Grade
 
-### iOS Native Module (`ViatomModule.swift`)
-- **Thread-Safe Event Emission (`DispatchQueue.main.async`)**: Updated the `emit` helper in `ViatomModule.swift` to automatically dispatch event emissions onto the main thread when invoked from background Bluetooth callbacks (such as `realWaveCallBack`). This prevents background thread-safety assertions and pauses at line 363.
+### Live PPG Wave, Motion Bar Chart & Native Module (`LivePpgWave.tsx`, `LiveMotionBarChart.tsx`, `ViatomModule.swift`)
+- **PPG Zero-Skip Path Filter (`rawV <= 0`)**: Skipped uninitialized or zero buffer slots when building SVG paths in `LivePpgWave.tsx` and started fresh `M` subpaths, completely eliminating vertical line drop artifacts.
+- **Motion Max Scale 30**: Set `max = 30` in `LiveMotionBarChart.tsx` and capped motion calculation at `30` (`min(30, max(1, Int((ac - 45.0) / 2.0)))`) in `ViatomModule.swift` so movement activity scales perfectly without towering over the chart.
 
 ## Verification Results
 - Verified with `analyze_file` (0 errors found).
-- Event emissions run thread-safely with zero pauses.
+- PPG wave renders clean, unbroken pulse shapes and motion scales smoothly up to 30.
