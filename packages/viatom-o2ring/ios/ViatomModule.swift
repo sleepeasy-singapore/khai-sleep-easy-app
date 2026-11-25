@@ -131,6 +131,7 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       let timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
         guard let self = self, self.connectedPeripheral != nil, self.isServiceReady, let communicator = self.communicator else { return }
         communicator.beginGetRealData()
+        communicator.beginGetRealWave()
       }
       RunLoop.main.add(timer, forMode: .common)
       self.realtimeTimer = timer
@@ -334,12 +335,13 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       return
     }
     let realData = VTO2Parser.parseO2RealObject(with: data)
+    let motionVal = min(100, Int(realData.vector) * 3)
 
     emit("onRealtime", [
       "spo2": Int(realData.spo2),
       "pr": Int(realData.hr),
       "pi": Double(realData.pi) / 10.0,
-      "motion": Int(realData.vector),
+      "motion": motionVal,
       "ts": Int(Date().timeIntervalSince1970 * 1000)
     ])
   }
@@ -354,17 +356,14 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     guard let data = data else { return }
     let realWave = VTO2Parser.parseO2RealWave(with: data)
     if let wave = realWave as? VTRealWave, let rawPoints = wave.points as? [NSNumber], !rawPoints.isEmpty {
-      let points = rawPoints.map { min(190, max(30, $0.intValue)) }
-      let doublePts = points.map { Double($0) }
-      let minPt = doublePts.min() ?? 30
-      let maxPt = doublePts.max() ?? 190
-      let ac = maxPt - minPt
-      let motionVal = ac > 100.0 ? min(15, max(1, Int((ac - 100.0) / 10.0))) : 0
-
-      emit("onRealtime", [
-        "motion": motionVal,
-        "ts": Int(Date().timeIntervalSince1970 * 1000)
-      ])
+      var points = rawPoints.map { min(190, max(30, $0.intValue)) }
+      if points.count > 2 {
+        var smoothed = points
+        for i in 1..<(points.count - 1) {
+          smoothed[i] = (points[i-1] + points[i] + points[i+1]) / 3
+        }
+        points = smoothed
+      }
 
       emit("onPpgPacket", [
         "samples": points,
