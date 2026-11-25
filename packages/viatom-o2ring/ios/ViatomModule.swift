@@ -127,10 +127,13 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
   private func startRealtimeTimer() {
     stopRealtimeTimer()
     DispatchQueue.main.async { [weak self] in
-      self?.realtimeTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+      guard let self = self else { return }
+      let timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
         guard let self = self, self.connectedPeripheral != nil, self.isServiceReady, let communicator = self.communicator else { return }
         communicator.beginGetRealData()
       }
+      RunLoop.main.add(timer, forMode: .common)
+      self.realtimeTimer = timer
     }
   }
 
@@ -351,16 +354,12 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     guard let data = data else { return }
     let realWave = VTO2Parser.parseO2RealWave(with: data)
     if let wave = realWave as? VTRealWave, let rawPoints = wave.points as? [NSNumber], !rawPoints.isEmpty {
-      let scaledPoints = rawPoints.map { pt -> Int in
-        let val = pt.intValue
-        return min(170, max(50, 110 + (val * 3)))
-      }
-
-      let doublePts = rawPoints.map { $0.doubleValue }
-      let minPt = doublePts.min() ?? 0
-      let maxPt = doublePts.max() ?? 1
+      let points = rawPoints.map { min(190, max(30, $0.intValue)) }
+      let doublePts = points.map { Double($0) }
+      let minPt = doublePts.min() ?? 30
+      let maxPt = doublePts.max() ?? 190
       let ac = maxPt - minPt
-      let motionVal = ac > 60.0 ? min(50, max(1, Int((ac - 60.0) / 4.0))) : 0
+      let motionVal = ac > 20.0 ? min(50, max(1, Int((ac - 20.0) / 3.0))) : 0
 
       emit("onRealtime", [
         "motion": motionVal,
@@ -368,7 +367,7 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       ])
 
       emit("onPpgPacket", [
-        "samples": scaledPoints,
+        "samples": points,
         "ts": Int(Date().timeIntervalSince1970 * 1000)
       ])
     }
