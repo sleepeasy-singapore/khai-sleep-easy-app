@@ -131,6 +131,7 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       let timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
         guard let self = self, self.connectedPeripheral != nil, self.isServiceReady, let communicator = self.communicator else { return }
         communicator.beginGetRealData()
+        communicator.beginGetRealWave()
       }
       RunLoop.main.add(timer, forMode: .common)
       self.realtimeTimer = timer
