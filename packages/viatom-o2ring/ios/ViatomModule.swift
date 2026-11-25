@@ -374,17 +374,25 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
         ppgBuffer.removeFirst(ppgBuffer.count - 250)
       }
 
-      var smoothed = ppgBuffer
-      if smoothed.count > 4 {
-        for i in 2..<(smoothed.count - 2) {
-          smoothed[i] = (smoothed[i-2] + 2 * smoothed[i-1] + 3 * smoothed[i] + 2 * smoothed[i+1] + smoothed[i+2]) / 9
+      var smoothedNew = cleaned
+      let bufCount = ppgBuffer.count
+      let cleanedCount = cleaned.count
+      if bufCount >= cleanedCount + 4 {
+        for i in 0..<cleanedCount {
+          let bufIdx = (bufCount - cleanedCount) + i
+          let p0 = ppgBuffer[bufIdx - 2]
+          let p1 = ppgBuffer[bufIdx - 1]
+          let p2 = ppgBuffer[bufIdx]
+          let p3 = bufIdx + 1 < bufCount ? ppgBuffer[bufIdx + 1] : p2
+          let p4 = bufIdx + 2 < bufCount ? ppgBuffer[bufIdx + 2] : p3
+          smoothedNew[i] = (p0 + 2 * p1 + 3 * p2 + 2 * p3 + p4) / 9
         }
       }
 
-      let chunk = Array(smoothed.suffix(64))
-      let minPt = chunk.min() ?? 30
-      let maxPt = chunk.max() ?? 190
-      let ac = maxPt - minPt
+      let doublePts = cleaned.map { Double($0) }
+      let minPt = doublePts.min() ?? 30
+      let maxPt = doublePts.max() ?? 190
+      let ac = Double(maxPt - minPt)
       let motionVal = ac > 45.0 ? min(30, max(1, Int((ac - 45.0) / 2.0))) : 0
 
       emit("onRealtime", [
@@ -393,7 +401,7 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       ])
 
       emit("onPpgPacket", [
-        "samples": chunk,
+        "samples": smoothedNew,
         "ts": Int(Date().timeIntervalSince1970 * 1000)
       ])
     }
