@@ -335,15 +335,17 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       return
     }
     let realData = VTO2Parser.parseO2RealObject(with: data)
-    let motionVal = min(100, Int(realData.vector) * 3)
 
-    emit("onRealtime", [
+    var dict: [String: Any?] = [
       "spo2": Int(realData.spo2),
       "pr": Int(realData.hr),
       "pi": Double(realData.pi) / 10.0,
-      "motion": motionVal,
       "ts": Int(Date().timeIntervalSince1970 * 1000)
-    ])
+    ]
+    if realData.vector > 0 {
+      dict["motion"] = Int(realData.vector)
+    }
+    emit("onRealtime", dict)
   }
 
   @objc(realDataCallBackWithData:originalData:)
@@ -356,16 +358,7 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     guard let data = data else { return }
     let realWave = VTO2Parser.parseO2RealWave(with: data)
     if let wave = realWave as? VTRealWave, let rawPoints = wave.points as? [NSNumber], !rawPoints.isEmpty {
-      let doublePts = rawPoints.map { $0.doubleValue }
-      let minPt = doublePts.min() ?? 0
-      let maxPt = doublePts.max() ?? 1
-      let rangeSpan = max(1.0, maxPt - minPt)
-
-      var points = doublePts.map { pt -> Int in
-        let norm = (pt - minPt) / rangeSpan
-        return Int(40.0 + norm * 110.0)
-      }
-
+      var points = rawPoints.map { min(190, max(30, $0.intValue)) }
       if points.count > 2 {
         var smoothed = points
         for i in 1..<(points.count - 1) {
@@ -374,8 +367,11 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
         points = smoothed
       }
 
+      let doublePts = points.map { Double($0) }
+      let minPt = doublePts.min() ?? 30
+      let maxPt = doublePts.max() ?? 190
       let ac = maxPt - minPt
-      let motionVal = ac > 30.0 ? min(50, max(1, Int((ac - 30.0) / 2.0))) : 0
+      let motionVal = ac > 25.0 ? min(50, max(1, Int((ac - 25.0) / 2.0))) : 0
 
       emit("onRealtime", [
         "motion": motionVal,
