@@ -131,7 +131,6 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       let timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
         guard let self = self, self.connectedPeripheral != nil, self.isServiceReady, let communicator = self.communicator else { return }
         communicator.beginGetRealData()
-        communicator.beginGetRealWave()
       }
       RunLoop.main.add(timer, forMode: .common)
       self.realtimeTimer = timer
@@ -360,7 +359,7 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       let minPt = doublePts.min() ?? 30
       let maxPt = doublePts.max() ?? 190
       let ac = maxPt - minPt
-      let motionVal = ac > 30.0 ? min(50, max(1, Int((ac - 30.0) / 2.0))) : 0
+      let motionVal = ac > 100.0 ? min(15, max(1, Int((ac - 100.0) / 10.0))) : 0
 
       emit("onRealtime", [
         "motion": motionVal,

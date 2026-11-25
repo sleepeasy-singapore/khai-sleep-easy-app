@@ -1,13 +1,13 @@
-# PPG Vertical Spike Jump Guard & Motion Threshold Walkthrough
+# Continuous SVG Path & Refined Motion Scaling Walkthrough
 
 Successfully updated [LivePpgWave.tsx](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/components/live/LivePpgWave.tsx) and [ViatomModule.swift](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/packages/viatom-o2ring/ios/ViatomModule.swift).
 
 ## Changes Made
 
 ### Live PPG Wave & Native Module (`LivePpgWave.tsx` & `ViatomModule.swift`)
-- **Vertical Spike Jump Guard (`dy > h * 0.6`)**: Added a path-breaking jump guard in `LivePpgWave.tsx`. If consecutive points jump vertically by more than 60% of the chart height, it inserts a new subpath (`M`) instead of drawing an ugly vertical connecting line (`L`), removing all spike artifacts.
-- **Refined Motion Threshold (`ac > 30.0`)**: Adjusted motion activation threshold to `30.0` in `ViatomModule.swift`, ensuring motion remains zero when still and scales dynamically when moving.
+- **Restored Continuous SVG Path (`LivePpgWave.tsx`)**: Removed the `dy > h * 0.6` path-breaking jump guard and restored standard continuous SVG path joining (`parts.push((i === 0 ? "M" : "L") + ...)`), ensuring smooth, unbroken pulse waveforms.
+- **Refined Motion Threshold (`ac > 100.0`)**: Adjusted motion scaling (`ac > 100.0 ? min(15, max(1, Int((ac - 100.0) / 10.0))) : 0`) so motion bars remain clean and proportional during movement without dominating the card.
 
 ## Verification Results
 - Verified with `analyze_file` (0 errors found).
-- PPG wave renders clean pulse pulses without vertical spikes, and motion tracks cleanly.
+- PPG wave renders smoothly and motion bars scale proportionally.
