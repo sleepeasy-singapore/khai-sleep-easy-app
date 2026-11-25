@@ -349,22 +349,24 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
   }
 
   @objc(realDataCallBackWithData:originalData:)
-  func realDataCallBack(with data: Data!, originalData: Data!) {
-    realDataCallBack(with: data)
+  func realDataCallBack(with data: Data?, originalData: Data?) {
+    if let data = data {
+      realDataCallBack(with: data)
+    }
   }
 
   @objc(realWaveCallBackWithData:)
-  func realWaveCallBack(with data: Data!) {
+  func realWaveCallBack(with data: Data?) {
     guard let data = data else { return }
     let realWave = VTO2Parser.parseO2RealWave(with: data)
-    if let wave = realWave as? VTRealWave, let rawPoints = wave.points as? [NSNumber], !rawPoints.isEmpty {
-      let points = rawPoints.map { pt -> Int in
+    print("ViatomModule: realWave=\(realWave), points=\(String(describing: realWave.points)), type=\(type(of: realWave.points))")
+    if let rawPoints = realWave.points as? [NSNumber], !rawPoints.isEmpty {
+      var points = rawPoints.map { pt -> Int in
         let v = pt.intValue
         let cleanV = v < 0 ? v + 256 : v
         return min(190, max(30, cleanV))
       }
 
-      var smoothed = points
       if points.count > 2 {
         var smoothedPoints = points
         for i in 1..<(points.count - 1) {
