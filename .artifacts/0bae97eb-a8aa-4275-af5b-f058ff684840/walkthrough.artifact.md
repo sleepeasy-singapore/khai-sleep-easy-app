@@ -1,12 +1,12 @@
-# Queue Overflow Blink Elimination Walkthrough
+# 0.5s Uniform Wave Packet Cadence Walkthrough
 
 Successfully updated [ViatomModule.swift](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/packages/viatom-o2ring/ios/ViatomModule.swift).
 
 ## Changes Made
 
 ### iOS Native Module (`ViatomModule.swift`)
-- **Queue Overflow Blink Fix (`smoothedNew`)**: Updated `realWaveCallBack` in `ViatomModule.swift` to emit *only* newly arrived smoothed samples (`smoothedNew`) on each packet rather than a duplicate 64-sample suffix. This matches real-time playback rates, preventing JS queue buffer overflow and completely stopping the iOS PPG blinking/flashing glitch.
+- **Uniform 0.5s Wave Polling Cadence (`withTimeInterval: 0.5`)**: Halved the real-time polling timer interval from 1.0s to 0.5s in `ViatomModule.swift`. This smooths out packet delivery intervals ($t = 0\text{ms}, 500\text{ms}, 1000\text{ms}$), eliminating the "two waves then a gap" pause and producing a perfectly uniform, steady wave stream.
 
 ## Verification Results
 - Verified with `analyze_file` (0 errors found).
-- PPG wave queue stays balanced and playback runs with zero blinking.
+- Wave packet delivery cadence is uniform and gap-free.

@@ -129,7 +129,7 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     stopRealtimeTimer()
     DispatchQueue.main.async { [weak self] in
       guard let self = self else { return }
-      let timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+      let timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
         guard let self = self, self.connectedPeripheral != nil, self.isServiceReady, let communicator = self.communicator else { return }
         communicator.beginGetRealData()
         communicator.beginGetRealWave()
