@@ -360,39 +360,37 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     guard let data = data else { return }
     let realWave = VTO2Parser.parseO2RealWave(with: data)
 
-    if let nsArray = realWave.points as? NSArray {
-      let rawPoints = nsArray.compactMap { $0 as? NSNumber }
-      if !rawPoints.isEmpty {
-        var points = rawPoints.map { pt -> Int in
-          let v = pt.intValue
-          let cleanV = v < 0 ? v + 256 : v
-          return min(190, max(30, cleanV))
-        }
-
-        if points.count > 2 {
-          var smoothedPoints = points
-          for i in 1..<(points.count - 1) {
-            smoothedPoints[i] = (points[i-1] + points[i] + points[i+1]) / 3
-          }
-          points = smoothedPoints
-        }
-
-        let doublePts = points.map { Double($0) }
-        let minPt = doublePts.min() ?? 30
-        let maxPt = doublePts.max() ?? 190
-        let ac = maxPt - minPt
-        let motionVal = ac > 45.0 ? min(50, max(1, Int((ac - 45.0) / 2.5))) : 0
-
-        emit("onRealtime", [
-          "motion": motionVal,
-          "ts": Int(Date().timeIntervalSince1970 * 1000)
-        ])
-
-        emit("onPpgPacket", [
-          "samples": points,
-          "ts": Int(Date().timeIntervalSince1970 * 1000)
-        ])
+    let rawPoints = realWave.points.compactMap { $0 as? NSNumber }
+    if !rawPoints.isEmpty {
+      var points = rawPoints.map { pt -> Int in
+        let v = pt.intValue
+        let cleanV = v < 0 ? v + 256 : v
+        return min(190, max(30, cleanV))
       }
+
+      if points.count > 2 {
+        var smoothedPoints = points
+        for i in 1..<(points.count - 1) {
+          smoothedPoints[i] = (points[i-1] + points[i] + points[i+1]) / 3
+        }
+        points = smoothedPoints
+      }
+
+      let doublePts = points.map { Double($0) }
+      let minPt = doublePts.min() ?? 30
+      let maxPt = doublePts.max() ?? 190
+      let ac = maxPt - minPt
+      let motionVal = ac > 45.0 ? min(50, max(1, Int((ac - 45.0) / 2.5))) : 0
+
+      emit("onRealtime", [
+        "motion": motionVal,
+        "ts": Int(Date().timeIntervalSince1970 * 1000)
+      ])
+
+      emit("onPpgPacket", [
+        "samples": points,
+        "ts": Int(Date().timeIntervalSince1970 * 1000)
+      ])
     }
   }
 
@@ -635,7 +633,13 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
         body[key] = value
       }
     }
-    sink(name, body)
+    if Thread.isMainThread {
+      sink(name, body)
+    } else {
+      DispatchQueue.main.async {
+        sink(name, body)
+      }
+    }
   }
 
   private func sendError(code: String, message: String) {

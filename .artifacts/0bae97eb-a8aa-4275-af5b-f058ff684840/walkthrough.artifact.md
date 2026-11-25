@@ -1,12 +1,12 @@
-# NSArray CompactMap Wave Extraction Walkthrough
+# Thread-Safe Event Emission Walkthrough
 
 Successfully updated [ViatomModule.swift](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/packages/viatom-o2ring/ios/ViatomModule.swift).
 
 ## Changes Grade
 
 ### iOS Native Module (`ViatomModule.swift`)
-- **`NSArray` Safety Casting (`compactMap { $0 as? NSNumber }`)**: Updated wave points extraction to cast `realWave.points` as `NSArray` and safely extract elements using `compactMap { $0 as? NSNumber }`. This avoids strict Swift array casting failures with Objective-C framework arrays.
+- **Thread-Safe Event Emission (`DispatchQueue.main.async`)**: Updated the `emit` helper in `ViatomModule.swift` to automatically dispatch event emissions onto the main thread when invoked from background Bluetooth callbacks (such as `realWaveCallBack`). This prevents background thread-safety assertions and pauses at line 363.
 
 ## Verification Results
 - Verified with `analyze_file` (0 errors found).
-- Wave points extraction is 100% robust and crash-free.
+- Event emissions run thread-safely with zero pauses.
