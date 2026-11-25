@@ -123,6 +123,7 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
   }
 
   private var realtimeTimer: Timer?
+  private var ppgBuffer: [Int] = []
 
   private func startRealtimeTimer() {
     stopRealtimeTimer()
@@ -362,23 +363,27 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
 
     let rawPoints = realWave.points.compactMap { $0 as? NSNumber }
     if !rawPoints.isEmpty {
-      var points = rawPoints.map { pt -> Int in
+      let cleaned = rawPoints.map { pt -> Int in
         let v = pt.intValue
         let cleanV = v < 0 ? v + 256 : v
         return min(190, max(30, cleanV))
       }
 
-      if points.count > 4 {
-        var smoothedPoints = points
-        for i in 2..<(points.count - 2) {
-          smoothedPoints[i] = (points[i-2] + 2 * points[i-1] + 3 * points[i] + 2 * points[i+1] + points[i+2]) / 9
-        }
-        points = smoothedPoints
+      ppgBuffer.append(contentsOf: cleaned)
+      if ppgBuffer.count > 250 {
+        ppgBuffer.removeFirst(ppgBuffer.count - 250)
       }
 
-      let doublePts = points.map { Double($0) }
-      let minPt = doublePts.min() ?? 30
-      let maxPt = doublePts.max() ?? 190
+      var smoothed = ppgBuffer
+      if smoothed.count > 4 {
+        for i in 2..<(smoothed.count - 2) {
+          smoothed[i] = (smoothed[i-2] + 2 * smoothed[i-1] + 3 * smoothed[i] + 2 * smoothed[i+1] + smoothed[i+2]) / 9
+        }
+      }
+
+      let chunk = Array(smoothed.suffix(64))
+      let minPt = chunk.min() ?? 30
+      let maxPt = chunk.max() ?? 190
       let ac = maxPt - minPt
       let motionVal = ac > 45.0 ? min(30, max(1, Int((ac - 45.0) / 2.0))) : 0
 
@@ -388,7 +393,7 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
       ])
 
       emit("onPpgPacket", [
-        "samples": points,
+        "samples": chunk,
         "ts": Int(Date().timeIntervalSince1970 * 1000)
       ])
     }
