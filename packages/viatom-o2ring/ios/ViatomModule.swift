@@ -368,10 +368,10 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
         return min(190, max(30, cleanV))
       }
 
-      if points.count > 2 {
+      if points.count > 4 {
         var smoothedPoints = points
-        for i in 1..<(points.count - 1) {
-          smoothedPoints[i] = (points[i-1] + points[i] + points[i+1]) / 3
+        for i in 2..<(points.count - 2) {
+          smoothedPoints[i] = (points[i-2] + 2 * points[i-1] + 3 * points[i] + 2 * points[i+1] + points[i+2]) / 9
         }
         points = smoothedPoints
       }
