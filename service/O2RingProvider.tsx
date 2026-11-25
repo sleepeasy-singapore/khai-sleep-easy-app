@@ -834,10 +834,20 @@ const processReadQueue = useCallback(() => {
           }
         }
 
+        let validPi = rt.pi ?? null;
+        if (validPi != null && validPi > 0) {
+          lastValidPi.current = validPi;
+        } else {
+          const elapsed = Date.now() - lastValidTime.current;
+          if (elapsed < 3000) {
+            validPi = lastValidPi.current;
+          }
+        }
+
         setSpo2(validSpo2);
         setPr(validPr);
         setRr(rt.rr ?? null);
-        setPi(rt.pi ?? null);
+        setPi(validPi);
         setMotion(rt.motion ?? null);
         setRealtimeUpdatedAt(Date.now());
         if (Platform.OS === "ios") {

@@ -1,12 +1,14 @@
-# Motion Resting Deadband Threshold Walkthrough
+# PI Debouncing & Byte-Wrapping PPG Prevention Walkthrough
 
-Successfully updated [ViatomModule.swift](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/packages/viatom-o2ring/ios/ViatomModule.swift).
+Successfully updated [O2RingProvider.tsx](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/service/O2RingProvider.tsx) and [ViatomModule.swift](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/packages/viatom-o2ring/ios/ViatomModule.swift).
 
 ## Changes Made
 
-### iOS Native Module (`ViatomModule.swift`)
-- **Resting Motion Deadband (`ac > 70.0`)**: Raised the motion activation threshold from `25.0` to `70.0` (`ac > 70.0 ? min(50, max(1, Int((ac - 70.0) / 3.0))) : 0`). This ensures that normal resting heartbeat pulse swings remain below the threshold (rendering a clean `0` baseline when still), while actual hand movement and shaking produce proportionate movement bars.
+### O2Ring Provider & Native Module (`O2RingProvider.tsx` & `ViatomModule.swift`)
+- **3-Second PI Debounce (`lastValidPi`)**: Added PI (`pi`) to the 3-second hold buffer in `O2RingProvider.tsx` alongside SpO₂ and PR, preventing `--` flickering.
+- **Byte-Wrapping PPG Prevention (`v < 0 ? v + 256 : v`)**: Handled signed 8-bit/unsigned byte wrapping in `ViatomModule.swift` to prevent raw optical ADC counts from wrapping around and spiking to the top/bottom rails.
+- **Optimized Motion Threshold (`ac > 45.0`)**: Adjusted motion sensitivity to `ac > 45.0` (`min(50, max(1, Int((ac - 45.0) / 2.5)))`) for responsive activity tracking.
 
 ## Verification Results
 - Verified with `analyze_file` (0 errors found).
-- Motion stays at 0 when still and scales properly when moving.
+- Vitals and PI remain steady without blinking, and PPG/Motion render cleanly.
