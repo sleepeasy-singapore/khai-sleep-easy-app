@@ -157,12 +157,20 @@ const WaveLayer = React.memo(function WaveLayer({
       } else {
         // Left-to-right sweep progression using current ppgHzRef decimation
         const parts: string[] = [];
+        let prevY = 0;
         for (let i = 0; i < buf.length; i += decim) {
           const v = Math.min(RANGE_MAX, Math.max(RANGE_MIN, buf[i]));
           const f = (v - RANGE_MIN) / span;
           const y = pad + (FLIP ? f : 1 - f) * h;
           const x = (i / (WINDOW_SAMPLES - 1)) * w;
-          parts.push((i === 0 ? "M" : "L") + x.toFixed(1) + " " + y.toFixed(1));
+
+          const dy = Math.abs(y - prevY);
+          if (i === 0 || dy > h * 0.6) {
+            parts.push("M" + x.toFixed(1) + " " + y.toFixed(1));
+          } else {
+            parts.push("L" + x.toFixed(1) + " " + y.toFixed(1));
+          }
+          prevY = y;
         }
         nextD = parts.join(" ");
       }
