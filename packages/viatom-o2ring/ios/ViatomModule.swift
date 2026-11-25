@@ -356,7 +356,16 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
     guard let data = data else { return }
     let realWave = VTO2Parser.parseO2RealWave(with: data)
     if let wave = realWave as? VTRealWave, let rawPoints = wave.points as? [NSNumber], !rawPoints.isEmpty {
-      var points = rawPoints.map { min(190, max(30, $0.intValue)) }
+      let doublePts = rawPoints.map { $0.doubleValue }
+      let minPt = doublePts.min() ?? 0
+      let maxPt = doublePts.max() ?? 1
+      let rangeSpan = max(1.0, maxPt - minPt)
+
+      var points = doublePts.map { pt -> Int in
+        let norm = (pt - minPt) / rangeSpan
+        return Int(40.0 + norm * 110.0)
+      }
+
       if points.count > 2 {
         var smoothed = points
         for i in 1..<(points.count - 1) {
@@ -364,6 +373,14 @@ final class ViatomManager: NSObject, CBCentralManagerDelegate, VTO2CommunicateDe
         }
         points = smoothed
       }
+
+      let ac = maxPt - minPt
+      let motionVal = ac > 30.0 ? min(50, max(1, Int((ac - 30.0) / 2.0))) : 0
+
+      emit("onRealtime", [
+        "motion": motionVal,
+        "ts": Int(Date().timeIntervalSince1970 * 1000)
+      ])
 
       emit("onPpgPacket", [
         "samples": points,

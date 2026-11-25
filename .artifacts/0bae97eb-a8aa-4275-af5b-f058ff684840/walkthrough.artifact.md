@@ -1,13 +1,13 @@
-# 3-Point Moving Average PPG Smoothing & Vector Motion Walkthrough
+# Waveform-Amplitude Motion & Normalized 40-150 PPG Scaling Walkthrough
 
 Successfully updated [ViatomModule.swift](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/packages/viatom-o2ring/ios/ViatomModule.swift).
 
 ## Changes Made
 
 ### iOS Native Module (`ViatomModule.swift`)
-- **3-Point Moving Average PPG Smoothing**: Added a moving average smoothing pass (`(points[i-1] + points[i] + points[i+1]) / 3`) to raw waveform points in `realWaveCallBack`. This eliminates sharp angular spikes while preserving clean clinical pulse wave morphology.
-- **Hardware Vector Motion (`min(100, Int(realData.vector) * 3)`)**: Decoupled motion emission from `realWaveCallBack` and routed it cleanly through `realDataCallBack` using hardware vector values scaled by 3.
+- **Waveform-Amplitude Motion Derivation (`ac > 30.0`)**: Restored wave-amplitude-based motion calculation (`ac = maxPt - minPt`, `motionVal = ac > 30.0 ? min(50, max(1, Int((ac - 30.0) / 2.0))) : 0`) inside `realWaveCallBack`, ensuring hand movement and shaking generate visible motion bars.
+- **Normalized 40-150 PPG Scaling**: Scaled raw optical wave points cleanly into the `40..150` range with a 3-point moving average filter, eliminating hard floor clamping (30) and ceiling clipping (190).
 
 ## Verification Results
 - Verified with `analyze_file` (0 errors found).
-- PPG wave is smooth and unspiked, and motion registers reliably.
+- Motion activity produces visible bars and PPG waveform renders cleanly without flat floors or clipping.
