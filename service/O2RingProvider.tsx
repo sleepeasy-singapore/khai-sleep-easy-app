@@ -227,6 +227,10 @@ export function O2RingProvider({ children }: { children: React.ReactNode }) {
   const knownDevicesRef = React.useRef<DeviceItem[]>([]);
   const autoReconnectAttempted = React.useRef(false);
   const autoReconnectScanTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastValidSpo2 = React.useRef<number | null>(null);
+  const lastValidPr = React.useRef<number | null>(null);
+  const lastValidPi = React.useRef<number | null>(null);
+  const lastValidTime = React.useRef<number>(0);
   const connectingRef = React.useRef(false);
   const autoConnectingRef = React.useRef(false);
   const offFingerCountRef = React.useRef(0);
@@ -791,6 +795,19 @@ const processReadQueue = useCallback(() => {
 
         let validSpo2 = rt.spo2;
         if (validSpo2 != null && (validSpo2 < 50 || validSpo2 > 100)) validSpo2 = null;
+
+        if (validSpo2 != null && validSpo2 > 0 && validPr != null && validPr > 0) {
+          lastValidSpo2.current = validSpo2;
+          lastValidPr.current = validPr;
+          lastValidPi.current = rt.pi ?? null;
+          lastValidTime.current = Date.now();
+        } else {
+          const elapsed = Date.now() - lastValidTime.current;
+          if (elapsed < 3000) {
+            validSpo2 = lastValidSpo2.current;
+            validPr = lastValidPr.current;
+          }
+        }
 
         const connectedDuration = connectionTimeRef.current ? Date.now() - connectionTimeRef.current : 0;
         const isArmed = serviceReadyRef.current && connectedDuration > 6000;
