@@ -128,6 +128,10 @@ const WaveLayer = React.memo(function WaveLayer({
       }
       last = now;
 
+      if (buf.length === 0) {
+        for (let i = 0; i < WINDOW_SAMPLES; i++) buf.push(110);
+      }
+
       if (playing && n > 0) {
         if (queue.length === 0) {
           if (buf.length > 0) {
@@ -135,7 +139,13 @@ const WaveLayer = React.memo(function WaveLayer({
           }
         } else {
           const take = Math.min(n, queue.length);
-          for (let i = 0; i < take; i++) buf.push(queue.shift()!);
+          for (let i = 0; i < take; i++) {
+            const rawNext = queue.shift()!;
+            const lastVal = buf.length > 0 ? buf[buf.length - 1] : 110;
+            const delta = rawNext - lastVal;
+            const clampedNext = Math.abs(delta) > 25 ? lastVal + Math.sign(delta) * 25 : rawNext;
+            buf.push(clampedNext);
+          }
         }
         if (buf.length > WINDOW_SAMPLES) buf.splice(0, buf.length - WINDOW_SAMPLES);
       }

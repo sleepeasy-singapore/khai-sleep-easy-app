@@ -7,14 +7,12 @@ module.exports = ({ config }) => {
     name: isDistributor ? "SleepEasy Distributor" : "SleepEasy Patient",
     slug: "sleep-easy-app",
     scheme: "sleep-easy-app",
-    version: "1.3.4",
+    version: "1.3.5",
     orientation: "portrait",
     icon: "./assets/sleepeasylogo-android.png",
     userInterfaceStyle: "light",
     newArchEnabled: true,
     splash: {
-      image: "./assets/sleepeasylogo-android.png",
-      resizeMode: "contain",
       backgroundColor: "#ffffff",
     },
     updates: {
