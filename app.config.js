@@ -9,7 +9,9 @@ module.exports = ({ config }) => {
     scheme: "sleep-easy-app",
     version: "1.3.5",
     orientation: "portrait",
-    icon: "./assets/sleepeasylogo-android.png",
+    icon: isDistributor
+      ? "./assets/sleepeasylogo-distributor.png"
+      : "./assets/sleepeasylogo-android.png",
     userInterfaceStyle: "light",
     newArchEnabled: true,
     splash: {
@@ -18,9 +20,10 @@ module.exports = ({ config }) => {
       backgroundColor: "#ffffff",
     },
     updates: {
-      enabled: false,
+      enabled: true,
+      checkAutomatically: "ON_LOAD",
+      fallbackToCacheTimeout: 0,
     },
-    runtimeVersion: "1.3.5",
     ios: {
       supportsTablet: true,
       bundleIdentifier: isDistributor
@@ -47,7 +50,9 @@ module.exports = ({ config }) => {
     },
     android: {
       adaptiveIcon: {
-        foregroundImage: "./assets/sleepeasylogo-android.png",
+        foregroundImage: isDistributor
+          ? "./assets/sleepeasylogo-distributor.png"
+          : "./assets/sleepeasylogo-android.png",
         backgroundColor: "#ffffff",
       },
       edgeToEdgeEnabled: true,
