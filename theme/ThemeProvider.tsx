@@ -138,11 +138,7 @@ export const ThemeProvider: React.FC<React.PropsWithChildren> = ({
     [colors]
   );
 
-  const componentStyle = useMemo(() => {
-    button: {
-      backgroundColor: colors.tint;
-    }
-  }, []);
+
 
   // Final value shared across the app
   const value: ThemeContextValue = {
