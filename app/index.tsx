@@ -4,7 +4,7 @@ import { View, ActivityIndicator } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 /**
- * Root router entry: checks session storage and routes immediately to Welcome or WelcomeBack.
+ * Root router entry: checks session storage and routes immediately to Welcome or Home.
  */
 export default function Index() {
   useEffect(() => {
@@ -13,18 +13,16 @@ export default function Index() {
     const checkAndNavigate = async () => {
       try {
         console.log("[BOOT 2] Index Router Reading AsyncStorage patientID...");
-        const storedId = await AsyncStorage.getItem("patientID");
+        const storedId = await AsyncStorage.getItem("patientID").catch(() => null);
         if (!isMounted) return;
 
         console.log("[BOOT 3] Patient ID read:", storedId);
 
-        // If no ID found route to Welcome, otherwise go to WelcomeBack
         if (!storedId) {
           router.replace("/Welcome");
-          return;
+        } else {
+          router.replace("/(tabs)/home");
         }
-
-        router.replace("/WelcomeBack");
       } catch (e) {
         console.error("Error@app/index.tsx:", e);
         if (isMounted) router.replace("/Welcome");
