@@ -149,6 +149,7 @@ function InnerLayout() {
   const { hasShareIntent, shareIntent } = useShareIntentContext();
 
   useEffect(() => {
+    console.log("[BOOT 1] InnerLayout Mounted");
     if (!navState?.key) return;
     // Redirect anywhere in the app when a share intent arrives
     if (hasShareIntent && shareIntent && pathname !== "/Share") {
