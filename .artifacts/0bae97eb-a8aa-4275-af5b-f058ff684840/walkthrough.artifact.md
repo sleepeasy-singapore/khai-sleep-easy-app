@@ -1,12 +1,12 @@
-# Immediate Non-Blocking Startup Router Walkthrough
+# Startup Boot Log Markers Walkthrough
 
-Successfully updated [index.tsx](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/app/index.tsx).
+Successfully updated [_layout.tsx](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/app/_layout.tsx) and [index.tsx](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/app/index.tsx).
 
 ## Changes Made
 
-### Root Index Router (`index.tsx`)
-- **Immediate Non-Blocking Navigation (`checkAndNavigate`)**: Removed navigation state gating (`navState.key`) and timer delays in `app/index.tsx`. The session check executes immediately on mount, reading `AsyncStorage` and routing directly to `/WelcomeBack` or `/Welcome` in 5-10ms.
+### Startup Boot Tracing (`_layout.tsx` & `index.tsx`)
+- **Sequential Boot Logging Markers**: Added `[BOOT 1] InnerLayout Mounted`, `[BOOT 2] Index Router Reading AsyncStorage`, and `[BOOT 3] Patient ID read` log markers to trace exact execution flow after `Resolved Base URL` during cold startup.
 
 ## Verification Results
 - Verified with `analyze_file` (0 errors found).
-- Root router navigation executes instantly.
+- Console log markers trace startup execution steps cleanly.

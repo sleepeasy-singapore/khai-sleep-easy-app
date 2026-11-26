@@ -15,8 +15,11 @@ export default function Index() {
 
     const checkAndNavigate = async () => {
       try {
+        console.log("[BOOT 2] Index Router Reading AsyncStorage patientID...");
         const storedId = await AsyncStorage.getItem("patientID");
         if (!isMounted) return;
+
+        console.log("[BOOT 3] Patient ID read:", storedId, "Share intent:", hasShareIntent);
 
         // If share intent exists route to Share (highest priority)
         if (hasShareIntent && shareIntent) {
