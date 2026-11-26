@@ -22,6 +22,7 @@ const bannerLight = require("../assets/sleepeasylogo-banner.png");
 const bannerDark = require("../assets/sleepeasylogo-banner-darkMode.png");
 
 export default function Welcome() {
+  console.log("[BOOT 4] Welcome Screen Mounted");
   const { colors: C, fonts: F, isDark } = useTheme();
 
   const [email, setEmail] = useState<string>("");

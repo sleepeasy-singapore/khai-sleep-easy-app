@@ -85,10 +85,7 @@ export const ThemeProvider: React.FC<React.PropsWithChildren> = ({
   // Decide whether app should be dark:
   // - if user forced "dark" - true
   // - if user forced "light" - false
-  const isDark = useMemo(() => {
-    if (mode === "dark") return true;
-    if (mode === "light") return false;
-  }, [mode]);
+  const isDark = useMemo(() => mode === "dark", [mode]);
 
   // Change colors based on isDark
   const colors = useMemo(

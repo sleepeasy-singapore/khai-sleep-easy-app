@@ -1,12 +1,13 @@
-# Direct Instant Routing Walkthrough
+# Strict Boolean Theme & Welcome Screen Logging Walkthrough
 
-Successfully updated [index.tsx](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/app/index.tsx).
+Successfully updated [ThemeProvider.tsx](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/theme/ThemeProvider.tsx) and [Welcome.tsx](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/app/Welcome.tsx).
 
 ## Changes Made
 
-### Root Index Router (`index.tsx`)
-- **Direct Route Execution (`.catch(() => null)`)**: Wrapped `AsyncStorage.getItem("patientID")` with `.catch(() => null)` and routed directly to `/(tabs)/home` when logged in (or `/Welcome` when no ID exists). This eliminates all splash/redirect timers and guarantees instant navigation on cold startup.
+### Theme Provider & Welcome Screen (`ThemeProvider.tsx` & `Welcome.tsx`)
+- **Strict Boolean `isDark` (`mode === "dark"`)**: Updated `isDark` in `ThemeProvider.tsx` to return a strict boolean (`true` or `false`) instead of `undefined`.
+- **Added `[BOOT 4]` Logging Marker (`Welcome.tsx`)**: Added `console.log("[BOOT 4] Welcome Screen Mounted")` at the top of `Welcome()` to trace when the login/welcome screen mounts following `[BOOT 3] Patient ID read: null`.
 
 ## Verification Results
 - Verified with `analyze_file` (0 errors found).
-- Root router navigation executes instantly in 1ms.
+- Theme boolean and Welcome screen logging verified.
