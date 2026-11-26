@@ -13,13 +13,12 @@ module.exports = ({ config }) => {
     userInterfaceStyle: "light",
     newArchEnabled: true,
     splash: {
+      image: "./assets/sleepeasylogo-android.png",
+      resizeMode: "contain",
       backgroundColor: "#ffffff",
     },
     updates: {
-      enabled: true,
-      url: "https://u.expo.dev/fb24647a-0e66-494f-b8a2-17e2efd6656e",
-      checkAutomatically: "ON_LOAD",
-      fallbackToCacheTimeout: 0,
+      enabled: false,
     },
     runtimeVersion: {
       policy: "appVersion",

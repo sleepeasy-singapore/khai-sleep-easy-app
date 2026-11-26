@@ -12,30 +12,40 @@ export default function Index() {
   const navState = useRootNavigationState();
 
   useEffect(() => {
-    if (!navState?.key) return;
+    let handled = false;
 
-    /**
-     * Check if patient ID and No Share Intent exist before push user to Home Page.
-     */
     const checkAndNavigate = async () => {
-      const storedId = await AsyncStorage.getItem("patientID");
+      if (handled) return;
+      handled = true;
 
-      // If share intent exists route to Share (highest priority)
-      if (hasShareIntent && shareIntent) {
-        router.replace("/Share");
-        return;
-      }
+      try {
+        const storedId = await AsyncStorage.getItem("patientID");
 
-      // If no ID found route to Welcome, otherwise go Home
-      if (!storedId) {
+        // If share intent exists route to Share (highest priority)
+        if (hasShareIntent && shareIntent) {
+          router.replace("/Share");
+          return;
+        }
+
+        // If no ID found route to Welcome, otherwise go Home
+        if (!storedId) {
+          router.replace("/Welcome");
+          return;
+        }
+
+        router.replace("/WelcomeBack");
+      } catch (e) {
+        console.error("Error@app/index.tsx:", e);
         router.replace("/Welcome");
-        return;
       }
-
-      router.replace("/WelcomeBack");
     };
 
-    checkAndNavigate();
+    if (navState?.key) {
+      checkAndNavigate();
+    } else {
+      const fallbackTimer = setTimeout(checkAndNavigate, 400);
+      return () => clearTimeout(fallbackTimer);
+    }
   }, [navState?.key, hasShareIntent, shareIntent]);
 
   return (
