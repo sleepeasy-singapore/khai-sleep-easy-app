@@ -1,25 +1,22 @@
-import { router, useRootNavigationState } from "expo-router";
+import { router } from "expo-router";
 import { useEffect } from "react";
 import { View, ActivityIndicator } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useShareIntentContext } from "expo-share-intent";
 
 /**
- * This page is just to redirect users to the actual home page due to how expo router works
+ * Root router entry: checks session storage and routes immediately to Welcome, WelcomeBack, or Share.
  */
 export default function Index() {
   const { hasShareIntent, shareIntent } = useShareIntentContext();
-  const navState = useRootNavigationState();
 
   useEffect(() => {
-    let handled = false;
+    let isMounted = true;
 
     const checkAndNavigate = async () => {
-      if (handled) return;
-      handled = true;
-
       try {
         const storedId = await AsyncStorage.getItem("patientID");
+        if (!isMounted) return;
 
         // If share intent exists route to Share (highest priority)
         if (hasShareIntent && shareIntent) {
@@ -27,7 +24,7 @@ export default function Index() {
           return;
         }
 
-        // If no ID found route to Welcome, otherwise go Home
+        // If no ID found route to Welcome, otherwise go to WelcomeBack
         if (!storedId) {
           router.replace("/Welcome");
           return;
@@ -36,17 +33,16 @@ export default function Index() {
         router.replace("/WelcomeBack");
       } catch (e) {
         console.error("Error@app/index.tsx:", e);
-        router.replace("/Welcome");
+        if (isMounted) router.replace("/Welcome");
       }
     };
 
-    if (navState?.key) {
-      checkAndNavigate();
-    } else {
-      const fallbackTimer = setTimeout(checkAndNavigate, 400);
-      return () => clearTimeout(fallbackTimer);
-    }
-  }, [navState?.key, hasShareIntent, shareIntent]);
+    checkAndNavigate();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [hasShareIntent, shareIntent]);
 
   return (
     <View style={{ flex: 1, backgroundColor: "#ffffff", justifyContent: "center", alignItems: "center" }}>

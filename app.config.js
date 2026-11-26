@@ -20,9 +20,7 @@ module.exports = ({ config }) => {
     updates: {
       enabled: false,
     },
-    runtimeVersion: {
-      policy: "appVersion",
-    },
+    runtimeVersion: "1.3.5",
     ios: {
       supportsTablet: true,
       bundleIdentifier: isDistributor
