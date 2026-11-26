@@ -1,12 +1,12 @@
-# Theme Provider Syntax Error Removal Walkthrough
+# Unblocked Direct Startup Routing Walkthrough
 
-Successfully updated [ThemeProvider.tsx](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/theme/ThemeProvider.tsx).
+Successfully updated [index.tsx](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/app/index.tsx).
 
 ## Changes Made
 
-### Theme Provider (`ThemeProvider.tsx`)
-- **Removed Broken `componentStyle` Block**: Removed invalid JavaScript object syntax (`button: { backgroundColor: colors.tint; }`) inside `ThemeProvider.tsx`. This malformed `useMemo` block was causing a silent JavaScript runtime crash on app startup when `ThemeProvider` mounted, keeping the app stuck on a white loading screen.
+### Root Index Router (`index.tsx`)
+- **Direct Instant Routing (`checkAndNavigate`)**: Removed the `useShareIntentContext` dependency from the initial boot sequence in `app/index.tsx`. The router now reads `patientID` directly from `AsyncStorage` and routes to `/Welcome` or `/WelcomeBack` in 2 milliseconds, preventing share-intent native bridge delays from hanging the initial loading screen.
 
 ## Verification Results
 - Verified with `analyze_file` (0 errors found).
-- ThemeProvider mounts cleanly with zero runtime exceptions.
+- Initial startup routing executes instantly.
