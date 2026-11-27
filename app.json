@@ -20,7 +20,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.sleepeasy.app",
+      "bundleIdentifier": "com.sleepeasydev.app",
       "infoPlist": {
         "NSBluetoothAlwaysUsageDescription": "SleepEasy requires Bluetooth to connect to and sync data from your O2Ring device.",
         "NSBluetoothPeripheralUsageDescription": "SleepEasy requires Bluetooth access to discover nearby O2Ring devices."
@@ -32,7 +32,7 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.sleepeasy.app"
+      "package": "com.sleepeasydev.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"

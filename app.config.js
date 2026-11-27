@@ -27,8 +27,8 @@ module.exports = ({ config }) => {
     ios: {
       supportsTablet: true,
       bundleIdentifier: isDistributor
-        ? "com.sleepeasy.app.distributor"
-        : "com.sleepeasy.app",
+        ? "com.sleepeasydev.app.distributor"
+        : "com.sleepeasydev.app",
       infoPlist: {
         NSBluetoothAlwaysUsageDescription:
           "SleepEasy requires Bluetooth to connect to and sync data from your O2Ring device.",
@@ -57,8 +57,8 @@ module.exports = ({ config }) => {
       },
       edgeToEdgeEnabled: true,
       package: isDistributor
-        ? "com.sleepeasy.app.distributor"
-        : "com.sleepeasy.app",
+        ? "com.sleepeasydev.app.distributor"
+        : "com.sleepeasydev.app",
     },
     web: {
       favicon: "./assets/favicon.png",
