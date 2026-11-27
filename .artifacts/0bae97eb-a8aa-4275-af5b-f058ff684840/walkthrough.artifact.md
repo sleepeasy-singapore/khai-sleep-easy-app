@@ -1,12 +1,12 @@
-# Proven Working App Config Restoration Walkthrough
+# Session-Scoped Chart Series Reset Walkthrough
 
-Successfully updated [app.config.js](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/app.config.js).
+Successfully updated [O2RingProvider.tsx](file:///C:/Users/Wei Lin/Documents/GitHub/khai-sleep-easy-app/service/O2RingProvider.tsx).
 
-## Changes Made
+## Changes Grade
 
-### Expo Configuration (`app.config.js`)
-- **Restored Clean Working Configuration**: Replaced `app.config.js` with the proven working baseline configuration while retaining variant support for icons (`sleepeasylogo-distributor.png` vs `sleepeasylogo-android.png`), bundle identifiers, and package namespaces.
+### O2Ring Service Provider (`O2RingProvider.tsx`)
+- **Session-Scoped Reset Key (`sessionResetKey`)**: Added `connectionSessionId` tracking and passed `sessionResetKey = `${connectedDevice?.mac ?? "none"}_${connectionSessionId}`` into all `useReadingSeries` hooks. This guarantees that whenever a new session starts or the ring reconnects, all chart series points are instantly wiped (`setPoints([])`), preventing any ghosting or persistence of previous session data.
 
 ## Verification Results
 - Verified with `analyze_file` (0 errors found).
-- app.config.js parses successfully with zero errors.
+- Session reset key integrated successfully.

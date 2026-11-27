@@ -126,6 +126,7 @@ export function O2RingProvider({ children }: { children: React.ReactNode }) {
   const [sbp, setSbp] = useState<number | null>(null);
   const [dbp, setDbp] = useState<number | null>(null);
   const [isBpStabilizing, setIsBpStabilizing] = useState(false);
+  const [connectionSessionId, setConnectionSessionId] = useState(0);
   const stabilizationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const triggerBpStabilization = useCallback(() => {
@@ -1331,6 +1332,7 @@ const processReadQueue = useCallback(() => {
         setConnectedDevice(resolvedDevice);
         rememberDevice(resolvedDevice);
         connectionTimeRef.current = Date.now();
+        setConnectionSessionId(connectionTimeRef.current);
 
         const connectPromise = O2Ring.connect(resolvedDevice.mac, resolvedDevice.model);
         const timeoutPromise = new Promise((_, reject) =>
@@ -1439,6 +1441,7 @@ const processReadQueue = useCallback(() => {
       currentReading.current = null;
       readAttempts.current.clear();
       setConnectedDevice(null);
+      setConnectionSessionId(0);
       setSpo2(null);
       setPr(null);
       setRr(null);
@@ -1798,25 +1801,26 @@ const processReadQueue = useCallback(() => {
       }, [isDownloadingHistory]);
 
   const isValidSpo2 = (v: number) => v >= 20 && v <= 100;
-  const spo2Series = useReadingSeries(spo2, realtimeUpdatedAt, isValidSpo2, connectedDevice?.mac);
+  const sessionResetKey = `${connectedDevice?.mac ?? "none"}_${connectionSessionId}`;
+  const spo2Series = useReadingSeries(spo2, realtimeUpdatedAt, isValidSpo2, sessionResetKey);
   const isValidPr = (v: number) => v >= 20 && v <= 250;
-  const prSeries = useReadingSeries(pr, realtimeUpdatedAt, isValidPr, connectedDevice?.mac);
+  const prSeries = useReadingSeries(pr, realtimeUpdatedAt, isValidPr, sessionResetKey);
   const isSignalActive = spo2 != null && spo2 >= 20 && pr != null && pr >= 20;
   const isValidBpVal = (v: number) => v >= 30 && v <= 220;
   const isBpValid = isSignalActive && sbp != null && dbp != null && sbp >= 30 && dbp >= 30;
   const activeSbp = isBpValid ? Math.max(sbp, dbp) : null;
   const activeDbp = isBpValid ? Math.min(sbp, dbp) : null;
 
-  const sbpSeries = useReadingSeries(activeSbp, realtimeUpdatedAt, isValidBpVal, connectedDevice?.mac);
-  const dbpSeries = useReadingSeries(activeDbp, realtimeUpdatedAt, isValidBpVal, connectedDevice?.mac);
+  const sbpSeries = useReadingSeries(activeSbp, realtimeUpdatedAt, isValidBpVal, sessionResetKey);
+  const dbpSeries = useReadingSeries(activeDbp, realtimeUpdatedAt, isValidBpVal, sessionResetKey);
   const isValidMotion = (v: number) => v >= 0 && v <= 235;
   const filteredMotion = motion != null ? Math.max(0, motion - 20) : 0;
-  const motionSeries = useReadingSeries(filteredMotion, realtimeUpdatedAt, isValidMotion, connectedDevice?.mac);
+  const motionSeries = useReadingSeries(filteredMotion, realtimeUpdatedAt, isValidMotion, sessionResetKey);
   const rrValue = isSignalActive && pr != null && pr > 0
     ? calculateRespiratoryRate(prBuffer.current, ppgBufferRef.current.ir, ppgHzRef.current)
     : null;
   const isValidRr = (v: number) => v >= 5 && v <= 60;
-  const rrSeries = useReadingSeries(rrValue, realtimeUpdatedAt, isValidRr, connectedDevice?.mac);
+  const rrSeries = useReadingSeries(rrValue, realtimeUpdatedAt, isValidRr, sessionResetKey);
 
   const value = useMemo(
     () => ({
