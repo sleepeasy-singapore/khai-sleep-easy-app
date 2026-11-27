@@ -1,4 +1,4 @@
-package com.sleepeasy.app.patient
+package com.sleepeasy.app.distributor
 
 import android.os.Build
 import android.os.Bundle

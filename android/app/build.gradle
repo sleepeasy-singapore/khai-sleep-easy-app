@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.sleepeasy.app.patient'
+    namespace 'com.sleepeasy.app.distributor'
     defaultConfig {
-        applicationId 'com.sleepeasy.app.patient'
+        applicationId 'com.sleepeasy.app.distributor'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

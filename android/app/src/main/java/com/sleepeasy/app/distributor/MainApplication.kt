@@ -1,4 +1,4 @@
-package com.sleepeasy.app.patient
+package com.sleepeasy.app.distributor
 
 import android.app.Application
 import android.content.res.Configuration
